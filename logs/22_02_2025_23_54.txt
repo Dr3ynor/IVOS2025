@@ -1,0 +1,26 @@
+==== Logger started ====
+[23:54:16] File found: www/index.html
+[23:54:16] Index file requested
+[23:54:16] Response message sent
+==== Logger started ====
+[23:54:43] File found at: www/index.html
+[23:54:43] Index file requested
+[23:54:43] Response message sent
+[23:54:45] File found at: www/index.html
+[23:54:45] Index file requested
+[23:54:45] Response message sent
+[23:54:48] File found at: www/index.html
+[23:54:48] Index file requested
+[23:54:48] Response message sent
+[23:54:50] File found at: www/index.html
+[23:54:50] Index file requested
+[23:54:50] Response message sent
+[23:54:50] File found at: www/index.html
+[23:54:50] Index file requested
+[23:54:50] Response message sent
+[23:54:51] File found at: www/index.html
+[23:54:51] Index file requested
+[23:54:51] Response message sent
+[23:55:16] File found at: www/index.html
+[23:55:16] Index file requested
+[23:55:16] Response message sent

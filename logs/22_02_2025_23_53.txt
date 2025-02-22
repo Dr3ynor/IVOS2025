@@ -1,0 +1,4 @@
+==== Logger started ====
+[23:53:20] File found: /
+[23:53:20] Index file requested
+[23:53:20] Response message sent
