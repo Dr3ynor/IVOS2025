@@ -9,7 +9,6 @@
 #include <string.h>
 #include <thread>
 #include <map>
-#include <wait.h>
 
 #include <semaphore.h>
 #include <sys/stat.h>
@@ -59,50 +58,72 @@ std::string get_mime_type(const std::string& file_path)
 
 void handle_client(SSL *ssl) 
 {
-    Response response;
-    std::string body;
-    char buffer[1024] = {0};
-    printf("Waiting for client request...\n");
-
-    int bytes_read = SSL_read(ssl, buffer, 1024);
-    printf("Bytes read: %d\n", bytes_read);
-    printf("Buffer content: %s\n", buffer);
-    //read(client_socket, buffer, 1024);
-    RequestParser request_parser(buffer);
-    HttpRequest http_request = request_parser.parse();
-    std::string file_path = "www" + http_request.path;
-    std::string mime_type = get_mime_type(file_path);
-
-    if (response.fileExists(file_path)) 
+    int bytes_read;
+    while(1)
     {
-        body = response.loadFile(file_path);
-        logger.log("File found at: " + std::string(INDEX_PATH)); 
-    } 
-    else 
-    {
-        body = response.loadFile(FILE_NOT_FOUND_PATH);
-        logger.log("File not found: " + http_request.path);
+        Response response;
+        std::string body;
+        char buffer[1024] = {0};
+        printf("Waiting for client request...\n");
+
+        bytes_read = SSL_read(ssl, buffer, 1024-1);
+        printf("Bytes read: %d\n", bytes_read);
+        if(bytes_read == 0)
+        {
+            break;
+        }
+        else if(bytes_read < 0)
+        {
+            perror("read");
+            break;
+        }
+
+        printf("Bytes read: %d\n", bytes_read);
+        printf("Buffer content: %s\n", buffer);
+        //read(client_socket, buffer, 1024);
+        RequestParser request_parser(buffer);
+        HttpRequest http_request = request_parser.parse();
+        std::string file_path = "www" + http_request.path;
+        std::string mime_type = get_mime_type(file_path);
+        if (response.fileExists(file_path)) 
+        {
+            body = response.loadFile(file_path);
+            logger.log("File found at: " + std::string(INDEX_PATH)); 
+        } 
+        else 
+        {
+            body = response.loadFile(FILE_NOT_FOUND_PATH);
+            logger.log("File not found: " + http_request.path);
+        }
+        if (http_request.path == "/") 
+        {
+            body = response.loadFile(INDEX_PATH);
+            logger.log("Index file requested");
+        }
+
+
+        std::string response_message = response.buildResponse(body, mime_type);
+        std::cout << response_message << std::endl;
+        SSL_write(ssl, response_message.c_str(), response_message.length());
+        //dprintf(client_socket, "%s", response.buildResponse(body,mime_type).c_str());
+        logger.log("Response message sent");
+
     }
-    if (http_request.path == "/") 
-    {
-        body = response.loadFile(INDEX_PATH);
-        logger.log("Index file requested");
-    }
-
-
-
-    SSL_write(ssl, response.buildResponse(body,mime_type).c_str(), response.buildResponse(body,mime_type).size());
-    //dprintf(client_socket, "%s", response.buildResponse(body,mime_type).c_str());
-    logger.log("Response message sent");
+    SSL_free(ssl);
 }
 
 
 
 int main()
 {
+    SSL_load_error_strings();
+    SSL_library_init();
+    OpenSSL_add_ssl_algorithms();
+
     SSL_CTX *ctx = sslclass.create_context();
     sslclass.configure_context(ctx);
-
+    //sem_init(sem, 0, MAX_CLIENTS);
+    sem_unlink(SEM_NAME);
     sem = sem_open(SEM_NAME, O_RDWR | O_CREAT, 0666, MAX_CLIENTS);
     if (sem == SEM_FAILED) 
     {
@@ -157,28 +178,35 @@ int main()
         {
             fprintf(stderr, "SSL handshake failed.\n");
             ERR_print_errors_fp(stderr);
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
             close(new_socket);
             continue;
         }
         printf("SSL handshake successful.\n");
 
-        
-        //sem_wait(sem);
+        if(sem_trywait(sem) == -1)
+        {
+            perror("sem_trywait");
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
+            close(new_socket);
+            continue;
+        }
 
         pid_t pid = fork();
         if (pid == 0) // Child
         {
             close(server_fd);
             handle_client(ssl);
-            SSL_shutdown(ssl);
-            SSL_free(ssl);
+            
             close(new_socket);
-            // sem_post(sem);
-            exit(0);
+            sem_post(sem);
+            exit(EXIT_SUCCESS);
         }
         else if (pid > 0) // Parent
         {
-            close(new_socket); // Rodič zavře socket a pokračuje
+            close(new_socket);
         }
         else
         {

@@ -56,7 +56,7 @@ std::string Response::buildResponse(std::string body, std::string mime_type) {
         response += "200 OK\r\n";
     }
     response += "Content-Type: " + mime_type + "\r\n";
-    response += "Connection: close\r\n";
+    response += "Content-Length: " + std::to_string(body.length()) + "\r\n";
     response += "\r\n";
     response += body;
 

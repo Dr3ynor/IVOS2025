@@ -1,4 +1,0 @@
-==== Logger started ====
-[10:07:41] File found at: www/index.html
-[10:07:41] Index file requested
-[10:07:41] Response message sent
