@@ -16,7 +16,7 @@
 
 #define PORT                8080
 #define SEM_NAME            "/semaphore"
-#define MAX_CLIENTS         2
+#define MAX_CLIENTS         1
 #define INDEX_PATH          "www/index.html"
 #define FILE_NOT_FOUND_PATH "www/404.html"
 
@@ -178,6 +178,8 @@ void Server::run()
 
         if(sem_trywait(sem) == -1)
         {
+            SSL_write(ssl, "Server is busy. Please try again later.\n", 40);
+
             perror("sem_trywait");
             SSL_shutdown(ssl);
             SSL_free(ssl);
