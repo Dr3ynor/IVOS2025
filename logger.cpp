@@ -17,7 +17,8 @@ public:
     void log(const std::string& message);
 };
 
-void Logger::log(const std::string& message) {
+void Logger::log(const std::string& message) 
+{
     time_t now = time(nullptr);
     struct tm *localTime = localtime(&now);
 
@@ -28,14 +29,14 @@ void Logger::log(const std::string& message) {
 }
 
 
-Logger::Logger() {
+Logger::Logger() 
+{
     std::filesystem::create_directories("logs");
 
-    // Získání aktuálního času
+
     time_t now = time(nullptr);
     struct tm *localTime = localtime(&now);
 
-    // Vytvoření názvu souboru
     std::ostringstream filename;
     filename << "logs/"
              << std::setw(2) << std::setfill('0') << localTime->tm_mday << "_"
@@ -45,7 +46,6 @@ Logger::Logger() {
              << std::setw(2) << std::setfill('0') << localTime->tm_min
              << ".txt";
 
-    // Otevření souboru pro zápis
     log_file.open(filename.str(), std::ios::app);
     if (!log_file) {
         std::cerr << "Error during creating the file!" << std::endl;
