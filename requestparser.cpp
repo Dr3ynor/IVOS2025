@@ -23,7 +23,7 @@ private:
 HttpRequest RequestParser::parse()
 {
     printf("--------------------\n");
-    // printf("%s\n", request_.c_str());
+    printf("%s\n", request_.c_str());
     printf("--------------------\n");
 
     std::istringstream stream(request_);

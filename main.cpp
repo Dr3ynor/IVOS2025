@@ -39,6 +39,7 @@ std::map<std::string, std::string> mime_types =
     {".jpg", "image/jpeg"},
     {".gif", "image/gif"},
     {".svg", "image/svg+xml"},
+    {".ico", "image/x-icon"},
 };
 
 std::string get_mime_type(const std::string& file_path) 
@@ -80,7 +81,6 @@ void handle_client(SSL *ssl)
 
         printf("Bytes read: %d\n", bytes_read);
         printf("Buffer content: %s\n", buffer);
-        //read(client_socket, buffer, 1024);
         RequestParser request_parser(buffer);
         HttpRequest http_request = request_parser.parse();
         std::string file_path = "www" + http_request.path;
@@ -101,11 +101,8 @@ void handle_client(SSL *ssl)
             logger.log("Index file requested");
         }
 
-
         std::string response_message = response.buildResponse(body, mime_type);
-        std::cout << response_message << std::endl;
         SSL_write(ssl, response_message.c_str(), response_message.length());
-        //dprintf(client_socket, "%s", response.buildResponse(body,mime_type).c_str());
         logger.log("Response message sent");
 
     }
@@ -116,13 +113,15 @@ void handle_client(SSL *ssl)
 
 int main()
 {
-    SSL_load_error_strings();
-    SSL_library_init();
-    OpenSSL_add_ssl_algorithms();
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    socklen_t addrlen = sizeof(address);
+
 
     SSL_CTX *ctx = sslclass.create_context();
     sslclass.configure_context(ctx);
-    //sem_init(sem, 0, MAX_CLIENTS);
+
     sem_unlink(SEM_NAME);
     sem = sem_open(SEM_NAME, O_RDWR | O_CREAT, 0666, MAX_CLIENTS);
     if (sem == SEM_FAILED) 
@@ -131,10 +130,6 @@ int main()
         exit(EXIT_FAILURE);
     }
 
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int opt = 1;
-    socklen_t addrlen = sizeof(address);
 
     // Creating socket file descriptor
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
@@ -168,22 +163,14 @@ int main()
     }
 
     // Fork
-    
     while ((new_socket = accept(server_fd, (struct sockaddr*)&address, &addrlen))) 
     {
-        SSL *ssl;
-        ssl = SSL_new(ctx);
-        SSL_set_fd(ssl, new_socket);
-        if (SSL_accept(ssl) <= 0) 
+        SSL *ssl =sslclass.create_ssl(ctx, new_socket);
+        if (ssl == NULL)
         {
-            fprintf(stderr, "SSL handshake failed.\n");
-            ERR_print_errors_fp(stderr);
-            SSL_shutdown(ssl);
-            SSL_free(ssl);
-            close(new_socket);
             continue;
         }
-        printf("SSL handshake successful.\n");
+
 
         if(sem_trywait(sem) == -1)
         {
@@ -215,17 +202,8 @@ int main()
     }
     
 
-    // Threads
-    
-    /*
-    while ((new_socket = accept(server_fd, (struct sockaddr*)&address, &addrlen))) 
-    {
-        std::thread clientThread(handle_client, new_socket);
-        clientThread.detach();
-    }
-    */
     SSL_CTX_free(ctx);
-    //sem_close(sem);
-    //sem_unlink(SEM_NAME);
+    sem_close(sem);
+    sem_unlink(SEM_NAME);
     return 0;
 }

@@ -1,8 +1,8 @@
 CXX = g++
 CXXFLAGS = -Wall -Wextra -std=c++17 -pthread -lssl -lcrypto
 
-TARGET = server
-SRC = server.cpp
+TARGET = main
+SRC = main.cpp
 
 all: $(TARGET)
 
