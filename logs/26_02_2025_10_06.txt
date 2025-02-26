@@ -1,0 +1,2 @@
+==== Logger started ====
+[10:06:47] File found at: www/index.html

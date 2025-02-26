@@ -1,0 +1,10 @@
+==== Logger started ====
+[10:28:20] File found at: www/index.html
+[10:28:20] Index file requested
+[10:28:20] Response message sent
+==== Logger started ====
+[10:28:51] File found at: www/index.html
+[10:28:51] Index file requested
+[10:28:51] Response message sent
+[10:28:54] File found at: www/index.html
+[10:28:54] Response message sent

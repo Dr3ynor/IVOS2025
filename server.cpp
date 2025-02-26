@@ -9,18 +9,27 @@
 #include <string.h>
 #include <thread>
 #include <map>
+#include <wait.h>
+
+#include <semaphore.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define PORT 8080
 
 #include "response.cpp"
 #include "requestparser.cpp"
 #include "logger.cpp"
+#include "ssl.cpp"
 
 #define INDEX_PATH "www/index.html"
 #define FILE_NOT_FOUND_PATH "www/404.html"
-
+#define SEM_NAME    "/semaphore"
+#define MAX_CLIENTS 10
 
 Logger logger;
+sem_t *sem = nullptr;
+SSLclass sslclass = SSLclass();
 
 std::map<std::string, std::string> mime_types = 
 {
@@ -48,16 +57,21 @@ std::string get_mime_type(const std::string& file_path)
 }
 
 
-void handle_client(int client_socket) 
+void handle_client(SSL *ssl) 
 {
     Response response;
     std::string body;
     char buffer[1024] = {0};
-    read(client_socket, buffer, 1024);
+    printf("Waiting for client request...\n");
+
+    int bytes_read = SSL_read(ssl, buffer, 1024);
+    printf("Bytes read: %d\n", bytes_read);
+    printf("Buffer content: %s\n", buffer);
+    //read(client_socket, buffer, 1024);
     RequestParser request_parser(buffer);
     HttpRequest http_request = request_parser.parse();
     std::string file_path = "www" + http_request.path;
-    std::string mime_type = get_mime_type(file_path);;
+    std::string mime_type = get_mime_type(file_path);
 
     if (response.fileExists(file_path)) 
     {
@@ -75,7 +89,10 @@ void handle_client(int client_socket)
         logger.log("Index file requested");
     }
 
-    dprintf(client_socket, "%s", response.buildResponse(body,mime_type).c_str());
+
+
+    SSL_write(ssl, response.buildResponse(body,mime_type).c_str(), response.buildResponse(body,mime_type).size());
+    //dprintf(client_socket, "%s", response.buildResponse(body,mime_type).c_str());
     logger.log("Response message sent");
 }
 
@@ -83,6 +100,16 @@ void handle_client(int client_socket)
 
 int main()
 {
+    SSL_CTX *ctx = sslclass.create_context();
+    sslclass.configure_context(ctx);
+
+    sem = sem_open(SEM_NAME, O_RDWR | O_CREAT, 0666, MAX_CLIENTS);
+    if (sem == SEM_FAILED) 
+    {
+        perror("sem_open");
+        exit(EXIT_FAILURE);
+    }
+
     int server_fd, new_socket;
     struct sockaddr_in address;
     int opt = 1;
@@ -123,15 +150,39 @@ int main()
     
     while ((new_socket = accept(server_fd, (struct sockaddr*)&address, &addrlen))) 
     {
+        SSL *ssl;
+        ssl = SSL_new(ctx);
+        SSL_set_fd(ssl, new_socket);
+        if (SSL_accept(ssl) <= 0) 
+        {
+            fprintf(stderr, "SSL handshake failed.\n");
+            ERR_print_errors_fp(stderr);
+            close(new_socket);
+            continue;
+        }
+        printf("SSL handshake successful.\n");
+
+        
+        //sem_wait(sem);
+
         pid_t pid = fork();
         if (pid == 0) // Child
         {
             close(server_fd);
-            handle_client(new_socket);
-            exit(0);
-        } else // Parent
-        {
+            handle_client(ssl);
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
             close(new_socket);
+            // sem_post(sem);
+            exit(0);
+        }
+        else if (pid > 0) // Parent
+        {
+            close(new_socket); // Rodič zavře socket a pokračuje
+        }
+        else
+        {
+            perror("fork failed");
         }
     }
     
@@ -145,6 +196,8 @@ int main()
         clientThread.detach();
     }
     */
-
+    SSL_CTX_free(ctx);
+    //sem_close(sem);
+    //sem_unlink(SEM_NAME);
     return 0;
 }

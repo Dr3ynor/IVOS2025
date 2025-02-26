@@ -1,8 +1,0 @@
-==== Logger started ====
-[00:18:05] File found at: www/index.html
-[00:18:05] Response message sent
-[00:18:09] File found at: www/index.html
-[00:18:09] Index file requested
-[00:18:09] Response message sent
-[00:18:17] File not found: /asddas
-[00:18:17] Response message sent
