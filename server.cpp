@@ -24,7 +24,7 @@
 #define INDEX_PATH "www/index.html"
 #define FILE_NOT_FOUND_PATH "www/404.html"
 #define SEM_NAME    "/semaphore"
-#define MAX_CLIENTS 10
+#define MAX_CLIENTS 2
 
 Logger logger;
 sem_t *sem = nullptr;
