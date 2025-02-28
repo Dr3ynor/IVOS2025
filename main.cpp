@@ -2,8 +2,7 @@
 
 int main()
 {
-    
-    Server server = Server();
+    Server& server = Server::getInstance();
     server.semaphore_unlink_and_open();
     server.create_socket();
     server.bind_socket();

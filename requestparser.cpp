@@ -48,14 +48,5 @@ HttpRequest RequestParser::parse()
             request.headers[key] = value;
         }
     }
-    
-    /*
-    std::cout << "Method: " << request.method << "\n";
-    std::cout << "Path: " << request.path << "\n";
-    std::cout << "Version: " << request.version << "\n";
-    for (const auto& [key, value] : request.headers) {
-        std::cout << key << ": " << value << "\n";
-    }*/
-    
     return request;
 }

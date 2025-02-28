@@ -19,6 +19,7 @@
 #define MAX_CLIENTS         1
 #define INDEX_PATH          "www/index.html"
 #define FILE_NOT_FOUND_PATH "www/404.html"
+#define SERVICE_UNAVAILABLE "www/503.html"
 
 class Server
 {
@@ -31,15 +32,22 @@ class Server
     SSL_CTX *ctx;
     sem_t *sem = nullptr;
 
+    Server();
+    Server(const Server&) = delete;
+    Server& operator=(const Server&) = delete;
+
 
 
     public:
-    Server();
+    static Server& getInstance();
+
     void create_socket();
     void bind_socket();
     void listen_socket();
     void semaphore_unlink_and_open();
     void run();
+    void send_response(SSL *ssl, HttpRequest http_request);
+    void send_response(SSL *ssl, std::string path);
     void handle_client(SSL *ssl);
     std::string get_mime_type(const std::string& file_path);
     Logger logger;
@@ -47,6 +55,13 @@ class Server
 
 
 };
+
+Server& Server::getInstance()
+{
+    static Server instance;
+    return instance;
+}
+
 
 void Server::create_socket()
 {
@@ -114,8 +129,6 @@ void Server::handle_client(SSL *ssl)
     int bytes_read;
     while(1)
     {
-        Response response;
-        std::string body;
         char buffer[1024] = {0};
         printf("Waiting for client request...\n");
 
@@ -131,54 +144,62 @@ void Server::handle_client(SSL *ssl)
             break;
         }
 
-        printf("Bytes read: %d\n", bytes_read);
-        //printf("Buffer content: %s\n", buffer);
         RequestParser request_parser(buffer);
         HttpRequest http_request = request_parser.parse();
-        std::string file_path = "www" + http_request.path;
-        std::string mime_type = get_mime_type(file_path);
-        if (response.fileExists(file_path)) 
-        {
-            body = response.loadFile(file_path);
-            logger.log("File found at: " + std::string(INDEX_PATH)); 
-        } 
-        else 
-        {
-            body = response.loadFile(FILE_NOT_FOUND_PATH);
-            logger.log("File not found: " + http_request.path);
-        }
-        if (http_request.path == "/") 
-        {
-            body = response.loadFile(INDEX_PATH);
-            logger.log("Index file requested");
-        }
-
-        std::string response_message = response.buildResponse(body, mime_type);
-        SSL_write(ssl, response_message.c_str(), response_message.length());
-        logger.log("Response message sent");
+        send_response(ssl, http_request);
+        logger.log("Response sent");
 
     }
     SSL_free(ssl);
 }
 
+void Server::send_response(SSL *ssl, std::string file_path)
+{
+    Response response;
+    std::string body = response.loadFile(file_path);
+    std::string mime_type = get_mime_type(file_path);
+    std::string response_message = response.buildResponse(body, mime_type);
+    SSL_write(ssl, response_message.c_str(), response_message.length());
+    logger.log("Response message sent");
+}
 
 
+void Server::send_response(SSL *ssl, HttpRequest http_request)
+{
+    Response response;
+    std::string body;
+    std::string file_path = "www" + http_request.path;
+    std::string mime_type = get_mime_type(file_path);
+    if (response.fileExists(file_path)) 
+    {
+        body = response.loadFile(file_path);
+        logger.log("File found at: " + std::string(INDEX_PATH)); 
+    } 
+    else 
+    {
+        body = response.loadFile(FILE_NOT_FOUND_PATH);
+        logger.log("File not found: " + http_request.path);
+    }
+    if (http_request.path == "/") 
+    {
+        body = response.loadFile(INDEX_PATH);
+        logger.log("Index file requested");
+    }
 
+    std::string response_message = response.buildResponse(body, mime_type);
+    SSL_write(ssl, response_message.c_str(), response_message.length());
+    logger.log("Response message sent");
+}
 
 void Server::run()
 {
     while ((new_socket = accept(server_fd, (struct sockaddr*)&address, &addrlen))) 
     {
         SSL *ssl =sslclass.create_ssl(ctx, new_socket);
-        if (ssl == NULL)
-        {
-            continue;
-        }
-
 
         if(sem_trywait(sem) == -1)
         {
-            SSL_write(ssl, "Server is busy. Please try again later.\n", 40);
+            send_response(ssl, "www/503.html");
 
             perror("sem_trywait");
             SSL_shutdown(ssl);
