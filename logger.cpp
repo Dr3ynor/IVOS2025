@@ -1,3 +1,4 @@
+/*
 #include <string>
 #include <iostream>
 #include <sstream>
@@ -55,3 +56,4 @@ Logger::Logger()
 }
 
 Logger::~Logger() {}
+*/

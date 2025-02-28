@@ -12,7 +12,8 @@
 #include "ssl.cpp"
 #include "response.cpp"
 #include "requestparser.cpp"
-#include "logger.cpp"
+// #include "logger.cpp"
+#include "logger_strategy.cpp"
 
 #define PORT                8080
 #define SEM_NAME            "/semaphore"
@@ -50,7 +51,12 @@ class Server
     void send_response(SSL *ssl, std::string path);
     void handle_client(SSL *ssl);
     std::string get_mime_type(const std::string& file_path);
+
+    ConsoleLogger console_logger;
+    FileLogger file_logger;
     Logger logger;
+
+
     std::map<std::string, std::string> mime_types;
 
 
@@ -147,8 +153,6 @@ void Server::handle_client(SSL *ssl)
         RequestParser request_parser(buffer);
         HttpRequest http_request = request_parser.parse();
         send_response(ssl, http_request);
-        logger.log("Response sent");
-
     }
     SSL_free(ssl);
 }
@@ -236,8 +240,9 @@ void Server::run()
 
 
 
-Server::Server() : logger(), sslclass(), ctx(sslclass.create_context())
+Server::Server() : sslclass(), ctx(sslclass.create_context()), logger(&file_logger)
 {
+
     sslclass = SSLclass();
     sslclass.configure_context(ctx);
     address.sin_family = AF_INET;
