@@ -12,15 +12,9 @@
 #include "ssl.cpp"
 #include "response.cpp"
 #include "requestparser.cpp"
-// #include "logger.cpp"
 #include "logger_strategy.cpp"
 
-#define PORT                8080
-#define SEM_NAME            "/semaphore"
-#define MAX_CLIENTS         1
-#define INDEX_PATH          "www/index.html"
-#define FILE_NOT_FOUND_PATH "www/404.html"
-#define SERVICE_UNAVAILABLE "www/503.html"
+#include "defs.h"
 
 class Server
 {
@@ -262,4 +256,3 @@ Server::Server() : sslclass(), ctx(sslclass.create_context()), logger(&file_logg
     };
 
 }
-
