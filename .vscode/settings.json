@@ -64,6 +64,7 @@
         "variant": "cpp",
         "filesystem": "cpp",
         "msg": "cpp",
-        "cstring": "cpp"
+        "cstring": "cpp",
+        "smazat": "cpp"
     }
 }

@@ -12,17 +12,17 @@
 #include <fcntl.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <string>
+#include <fstream>
 #include <map>
 #include <vector>
 
 #include "../requestparser.cpp"
 #include "../response.cpp"
 
-
 #define INDEX_PATH          "../www/index.html"
 #define FILE_NOT_FOUND_PATH "../www/404.html"
 #define SERVICE_UNAVAILABLE "../www/503.html"
+#define LOG_FILE            "server.log"
 
 #define PORT 8080
 #define WORKER_COUNT 1
@@ -76,7 +76,31 @@ SSL_CTX* create_ssl_context()
     return ctx;
 }
 
-void handle_client(SSL* ssl) 
+void log_message(int msg_queue_id, const std::string& message) {
+    LogMessage log_msg;
+    log_msg.type = 1;
+    strncpy(log_msg.text, message.c_str(), sizeof(log_msg.text) - 1);
+    log_msg.text[sizeof(log_msg.text) - 1] = '\0';
+    msgsnd(msg_queue_id, &log_msg, sizeof(log_msg.text), 0);
+}
+
+void logger_process(int msg_queue_id) {
+    std::ofstream log_file(LOG_FILE, std::ios::app);
+    printf("Logger process started\n");
+    if (!log_file.is_open()) {
+        perror("Failed to open log file");
+        exit(EXIT_FAILURE);
+    }
+    while (true) {
+        LogMessage log_msg;
+        if (msgrcv(msg_queue_id, &log_msg, sizeof(log_msg.text), 1, 0) > 0) {
+            log_file << log_msg.text << std::endl;
+            log_file.flush();
+        }
+    }
+}
+
+void handle_client(SSL* ssl, int msg_queue_id) 
 {
     char buffer[1024] = {0};
     int bytes = SSL_read(ssl, buffer, sizeof(buffer));
@@ -91,17 +115,17 @@ void handle_client(SSL* ssl)
     if (response.fileExists(file_path)) 
     {
         body = response.loadFile(file_path);
-        //logger.log("File found at: " + std::string(INDEX_PATH)); 
+        log_message(msg_queue_id, "File found: " + file_path);
     } 
     else 
     {
         body = response.loadFile(FILE_NOT_FOUND_PATH);
-        //logger.log("File not found: " + http_request.path);
+        log_message(msg_queue_id, "File not found: " + http_request.path);
     }
     if (http_request.path == "/") 
     {
         body = response.loadFile(INDEX_PATH);
-        //logger.log("Index file requested");
+        log_message(msg_queue_id, "Index file requested");
     }
 
     std::string response_message = response.buildResponse(body, mime_type);
@@ -111,7 +135,7 @@ void handle_client(SSL* ssl)
     SSL_free(ssl);
 }
 
-void worker_process(int sock_fd, SSL_CTX* ctx) 
+void worker_process(int sock_fd, SSL_CTX* ctx, int msg_queue_id) 
 {
     while (true) 
     {
@@ -139,35 +163,38 @@ void worker_process(int sock_fd, SSL_CTX* ctx)
             close(client_sock);
             continue;
         }
-        handle_client(ssl);
+        handle_client(ssl, msg_queue_id);
     }
 }
 
-
 int main() 
 {
-
-
     SSL_library_init();
     OpenSSL_add_all_algorithms();
     SSL_load_error_strings();
     SSL_CTX* ctx = create_ssl_context();
-
+    int msg_queue_id = msgget(LOG_QUEUE_KEY, IPC_CREAT | 0666);
+    
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in address = {AF_INET, htons(PORT), INADDR_ANY};
     bind(server_fd, (struct sockaddr*)&address, sizeof(address));
     listen(server_fd, SOMAXCONN);
-
+    
+    pid_t logger_pid = fork();
+    if (logger_pid == 0) {
+        logger_process(msg_queue_id);
+        exit(0);
+    }
+    
     std::vector<pid_t> workers;
     int worker_pipes[WORKER_COUNT][2];
-    
     for (int i = 0; i < WORKER_COUNT; i++) 
     {
         socketpair(AF_UNIX, SOCK_STREAM, 0, worker_pipes[i]);
         pid_t pid = fork();
         if (pid == 0) {
             close(worker_pipes[i][1]);
-            worker_process(worker_pipes[i][0], ctx);
+            worker_process(worker_pipes[i][0], ctx, msg_queue_id);
             exit(0);
         }
         workers.push_back(pid);
@@ -199,4 +226,3 @@ int main()
         close(client_sock);
     }
 }
-
