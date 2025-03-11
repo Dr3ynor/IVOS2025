@@ -8,6 +8,12 @@
 #include <sys/stat.h>
 #include <string>
 #include <map>
+#include <vector>
+
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+
 
 #include "ssl.cpp"
 #include "response.cpp"
@@ -25,7 +31,6 @@ class Server
     int opt = 1;
     int server_fd, new_socket;
     SSL_CTX *ctx;
-    sem_t *sem = nullptr;
 
     Server();
     Server(const Server&) = delete;
@@ -39,7 +44,6 @@ class Server
     void create_socket();
     void bind_socket();
     void listen_socket();
-    void semaphore_unlink_and_open();
     void run();
     void send_response(SSL *ssl, HttpRequest http_request);
     void send_response(SSL *ssl, std::string path);
@@ -49,11 +53,21 @@ class Server
     ConsoleLogger console_logger;
     FileLogger file_logger;
     Logger logger;
-
-
     std::map<std::string, std::string> mime_types;
 
+    int worker_sockets[MAX_WORKERS][2];
+    void create_workers();
+    void create_logger();
+    std::vector<int> workers;
+    int logger_worker;
+    int log_queue_id;
+    int recv_fd(int socket);
+    void send_fd(int socket, int fd);
+};
 
+struct log_msg {
+    long mtype;
+    char text[256];
 };
 
 Server& Server::getInstance()
@@ -98,16 +112,6 @@ void Server::listen_socket()
     }
 }
 
-void Server::semaphore_unlink_and_open()
-{
-    sem_unlink(SEM_NAME);
-    sem = sem_open(SEM_NAME, O_RDWR | O_CREAT, 0666, MAX_CLIENTS);
-    if (sem == SEM_FAILED) 
-    {
-        perror("sem_open");
-        exit(EXIT_FAILURE);
-    }
-}
 
 std::string Server::get_mime_type(const std::string& file_path) 
 {
@@ -127,6 +131,7 @@ std::string Server::get_mime_type(const std::string& file_path)
 void Server::handle_client(SSL *ssl)
 {
     int bytes_read;
+    printf("handle_client start\n");
     while(1)
     {
         char buffer[1024] = {0};
@@ -138,11 +143,11 @@ void Server::handle_client(SSL *ssl)
         {
             break;
         }
-        else if(bytes_read < 0)
+        /*else if(bytes_read < 0)
         {
             perror("read");
             break;
-        }
+        }*/
 
         RequestParser request_parser(buffer);
         HttpRequest http_request = request_parser.parse();
@@ -158,7 +163,7 @@ void Server::send_response(SSL *ssl, std::string file_path)
     std::string mime_type = get_mime_type(file_path);
     std::string response_message = response.buildResponse(body, mime_type);
     SSL_write(ssl, response_message.c_str(), response_message.length());
-    logger.log("Response message sent");
+    //logger.log("Response message sent");
 }
 
 
@@ -171,68 +176,105 @@ void Server::send_response(SSL *ssl, HttpRequest http_request)
     if (response.fileExists(file_path)) 
     {
         body = response.loadFile(file_path);
-        logger.log("File found at: " + std::string(INDEX_PATH)); 
+        //logger.log("File found at: " + std::string(INDEX_PATH)); 
     } 
     else 
     {
         body = response.loadFile(FILE_NOT_FOUND_PATH);
-        logger.log("File not found: " + http_request.path);
+        //logger.log("File not found: " + http_request.path);
     }
     if (http_request.path == "/") 
     {
         body = response.loadFile(INDEX_PATH);
-        logger.log("Index file requested");
+        //logger.log("Index file requested");
     }
 
     std::string response_message = response.buildResponse(body, mime_type);
     SSL_write(ssl, response_message.c_str(), response_message.length());
-    logger.log("Response message sent");
+    //logger.log("Response message sent");
 }
-
-void Server::run()
+void Server::create_workers()
 {
-    while ((new_socket = accept(server_fd, (struct sockaddr*)&address, &addrlen))) 
+    for (int i = 0; i < MAX_WORKERS; i++) 
     {
-        SSL *ssl =sslclass.create_ssl(ctx, new_socket);
-
-        if(sem_trywait(sem) == -1)
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, worker_sockets[i]) < 0) 
         {
-            send_response(ssl, "www/503.html");
-
-            perror("sem_trywait");
-            SSL_shutdown(ssl);
-            SSL_free(ssl);
-            close(new_socket);
-            continue;
+            perror("socketpair failed");
+            exit(EXIT_FAILURE);
         }
 
         pid_t pid = fork();
-        if (pid == 0) // Child
+        workers.push_back(pid);
+        if (pid == -1) 
         {
-            close(server_fd);
-            handle_client(ssl);
-
-            
-            close(new_socket);
-            sem_post(sem);
-            exit(EXIT_SUCCESS);
+            perror("fork");
+            exit(1);
         }
-        else if (pid > 0) // Parent
+        
+        if (pid == 0)
         {
-            close(new_socket);
+            int new_socket;
+            new_socket = recv_fd(worker_sockets[i][1]);
+            SSL *ssl = sslclass.create_ssl(ctx, new_socket);
+            handle_client(ssl);
         }
         else
         {
-            perror("fork failed");
+            printf("Worker PID: %d\n", pid);
+            close(new_socket);
+            close(worker_sockets[i][1]);
         }
     }
-    SSL_CTX_free(ctx);
-    sem_close(sem);
-    sem_unlink(SEM_NAME);
+}
+void Server::create_logger()
+{
+    pid_t pid = fork();
+    logger_worker = pid;
+    if (pid == -1) 
+    {
+        perror("fork");
+        exit(1);
+    }
+    if (pid == 0)
+    {
+        FILE* log_file = fopen("server.log", "a");
+        if (!log_file) exit(EXIT_FAILURE);
+        
+        log_msg msg;
+        while (msgrcv(log_queue_id, &msg, sizeof(msg.text), 0, 0) > 0) {
+            fprintf(log_file, "%s\n", msg.text);
+            fflush(log_file);
+        }
+        fclose(log_file);
+        exit(0);
+    }
+    else
+    {
+        perror("fork");
+    }
 }
 
 
 
+void Server::run()
+{
+    create_workers();
+    create_logger();
+
+    while ((new_socket = accept(server_fd, (struct sockaddr*)&address, &addrlen))) 
+    {
+        for (int i = 0; i < MAX_WORKERS; i++) 
+        {
+            if (workers[i] > 0) 
+            {
+                send_fd(worker_sockets[i][0], new_socket);
+                break;
+            }
+        }
+
+    }
+    SSL_CTX_free(ctx);
+}
 
 Server::Server() : sslclass(), ctx(sslclass.create_context()), logger(&file_logger)
 {
@@ -255,4 +297,49 @@ Server::Server() : sslclass(), ctx(sslclass.create_context()), logger(&file_logg
         {".ico", "image/x-icon"},
     };
 
+}
+
+
+
+
+
+
+void Server::send_fd(int socket, int fd) {
+    struct msghdr msg = {0};
+    struct cmsghdr *cmsg;
+    char buf[CMSG_SPACE(sizeof(fd))];
+    memset(buf, 0, sizeof(buf));
+    struct iovec io = { .iov_base = (void*)"", .iov_len = 1 };
+
+    msg.msg_iov = &io;
+    msg.msg_iovlen = 1;
+    msg.msg_control = buf;
+    msg.msg_controllen = sizeof(buf);
+
+    cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(fd));
+    *((int *) CMSG_DATA(cmsg)) = fd;
+
+    sendmsg(socket, &msg, 0);
+}
+
+int Server::recv_fd(int socket) {
+    struct msghdr msg = {0};
+    struct cmsghdr *cmsg;
+    char buf[CMSG_SPACE(sizeof(int))];
+    struct iovec io = { .iov_base = (void*)"", .iov_len = 1 };
+
+    msg.msg_iov = &io;
+    msg.msg_iovlen = 1;
+    msg.msg_control = buf;
+    msg.msg_controllen = sizeof(buf);
+
+    if (recvmsg(socket, &msg, 0) < 0) {
+        return -1;
+    }
+
+    cmsg = CMSG_FIRSTHDR(&msg);
+    return *((int *) CMSG_DATA(cmsg));
 }
