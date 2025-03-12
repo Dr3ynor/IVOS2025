@@ -65,6 +65,7 @@
         "filesystem": "cpp",
         "msg": "cpp",
         "cstring": "cpp",
-        "smazat": "cpp"
+        "smazat": "cpp",
+        "csignal": "cpp"
     }
 }

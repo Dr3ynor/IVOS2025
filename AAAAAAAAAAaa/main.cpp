@@ -15,6 +15,9 @@
 #include <fstream>
 #include <map>
 #include <vector>
+#include <sys/wait.h>
+
+#include <csignal>
 
 #include "../requestparser.cpp"
 #include "../response.cpp"
@@ -27,6 +30,38 @@
 #define PORT 8080
 #define WORKER_COUNT 1
 #define LOG_QUEUE_KEY 1234
+
+std::vector<pid_t> workers;
+pid_t logger_pid;
+int msg_queue_id;
+int server_fd;
+
+void cleanup(int signo) {
+    std::cout << "Shutting down server..." << std::endl;
+
+    while(waitpid(-1, nullptr, 0) > 0);
+    {
+        std::cout << "Waiting for child processes to finish..." << std::endl;
+    }
+
+    close(server_fd);
+    msgctl(msg_queue_id, IPC_RMID, nullptr);
+
+    std::cout << "Server shutdown complete." << std::endl;
+    exit(0);
+}
+
+
+void setup_signal_handler() {
+    struct sigaction sa;
+    sa.sa_handler = cleanup;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+}
+
 
 std::map<std::string, std::string> mime_types = 
 {
@@ -169,24 +204,24 @@ void worker_process(int sock_fd, SSL_CTX* ctx, int msg_queue_id)
 
 int main() 
 {
+    setup_signal_handler();
     SSL_library_init();
     OpenSSL_add_all_algorithms();
     SSL_load_error_strings();
     SSL_CTX* ctx = create_ssl_context();
-    int msg_queue_id = msgget(LOG_QUEUE_KEY, IPC_CREAT | 0666);
+    msg_queue_id = msgget(LOG_QUEUE_KEY, IPC_CREAT | 0666);
     
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in address = {AF_INET, htons(PORT), INADDR_ANY};
     bind(server_fd, (struct sockaddr*)&address, sizeof(address));
     listen(server_fd, SOMAXCONN);
     
-    pid_t logger_pid = fork();
+    logger_pid = fork();
     if (logger_pid == 0) {
         logger_process(msg_queue_id);
         exit(0);
     }
     
-    std::vector<pid_t> workers;
     int worker_pipes[WORKER_COUNT][2];
     for (int i = 0; i < WORKER_COUNT; i++) 
     {
