@@ -36,24 +36,7 @@ pid_t logger_pid;
 int msg_queue_id;
 int server_fd;
 
-
-struct LogMessage {
-    long type;
-    char text[256];
-};
-
-void log_message(int msg_queue_id, const std::string& message) 
-{
-    LogMessage log_msg;
-    log_msg.type = 1;
-    strncpy(log_msg.text, message.c_str(), sizeof(log_msg.text) - 1);
-    log_msg.text[sizeof(log_msg.text) - 1] = '\0';
-    msgsnd(msg_queue_id, &log_msg, sizeof(log_msg.text), 0);
-}
-
-
-void cleanup(int signo) 
-{
+void cleanup(int signo) {
     std::cout << "Shutting down server..." << std::endl;
 
     while(waitpid(-1, nullptr, 0) > 0);
@@ -79,19 +62,10 @@ void setup_signal_handler() {
     sigaction(SIGTERM, &sa, nullptr);
 }
 
-std::map<std::string, std::string> executable_types = 
-{
-    // File extension, Linux executable type
-    {".php", "php"},
-    {".py","python"},
-    {".sh","bash"},
-};
-
 
 std::map<std::string, std::string> mime_types = 
 {
     {".html", "text/html"},
-    {".txt", "text/plain"},
     {".css", "text/css"},
     {".js", "application/javascript"},
     {".png", "image/png"},
@@ -99,55 +73,12 @@ std::map<std::string, std::string> mime_types =
     {".gif", "image/gif"},
     {".svg", "image/svg+xml"},
     {".ico", "image/x-icon"},
-    {".php", "application/x-httpd-php"},
-    {".py", "text/x-python"},
-    {".sh", "text/x-shellscript"},
 };
 
-std::string execute_file(const std::string& file_path, std::string body, std::string file_extension) 
-{
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) 
-    {
-        perror("pipe failed");
-        log_message(msg_queue_id, "Pipe creation failed for: " + file_path);
-    }
-
-    pid_t pid = fork();
-    if (pid == 0) 
-    {
-        // child
-        close(pipe_fd[0]);
-        dup2(pipe_fd[1], STDOUT_FILENO);
-        dup2(pipe_fd[1], STDERR_FILENO);
-        close(pipe_fd[1]);
-        execlp(executable_types[file_extension].c_str(), executable_types[file_extension].c_str(), file_path.c_str(), NULL);
-        perror("execlp failed");
-        exit(EXIT_FAILURE);
-    } 
-    else if (pid > 0) 
-    {
-        // parent
-        close(pipe_fd[1]);
-        char buffer[1024];
-        ssize_t bytes_read;
-        body.clear();
-        while ((bytes_read = read(pipe_fd[0], buffer, sizeof(buffer))) > 0) 
-        {
-            body.append(buffer, bytes_read);
-        }
-        close(pipe_fd[0]);
-        waitpid(pid, NULL, 0);
-        log_message(msg_queue_id, "File executed and output captured: " + file_path);
-    } 
-    else 
-    {
-        // Fork failed
-        perror("fork failed");
-        log_message(msg_queue_id, "Fork failed for: " + file_path);
-    }
-    return body;
-}
+struct LogMessage {
+    long type;
+    char text[256];
+};
 
 std::string get_mime_type(const std::string& file_path) 
 {
@@ -172,14 +103,21 @@ SSL_CTX* create_ssl_context()
         exit(EXIT_FAILURE);
     }
     SSL_CTX_set_ecdh_auto(ctx, 1);
-    if (SSL_CTX_use_certificate_file(ctx, "certificates/cert.pem", SSL_FILETYPE_PEM) <= 0 ||
-        SSL_CTX_use_PrivateKey_file(ctx, "certificates/privkey.pem", SSL_FILETYPE_PEM) <= 0) {
+    if (SSL_CTX_use_certificate_file(ctx, "../certificates/cert.pem", SSL_FILETYPE_PEM) <= 0 ||
+        SSL_CTX_use_PrivateKey_file(ctx, "../certificates/privkey.pem", SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
     return ctx;
 }
 
+void log_message(int msg_queue_id, const std::string& message) {
+    LogMessage log_msg;
+    log_msg.type = 1;
+    strncpy(log_msg.text, message.c_str(), sizeof(log_msg.text) - 1);
+    log_msg.text[sizeof(log_msg.text) - 1] = '\0';
+    msgsnd(msg_queue_id, &log_msg, sizeof(log_msg.text), 0);
+}
 
 void logger_process(int msg_queue_id) {
     std::ofstream log_file(LOG_FILE, std::ios::app);
@@ -197,17 +135,6 @@ void logger_process(int msg_queue_id) {
     }
 }
 
-
-std::string get_file_extension(const std::string& file_path) 
-{
-    size_t pos = file_path.find_last_of('.');
-    if (pos != std::string::npos) 
-    {
-        return file_path.substr(pos);
-    }
-    return "";
-}
-
 void handle_client(SSL* ssl, int msg_queue_id) 
 {
     char buffer[1024] = {0};
@@ -218,26 +145,8 @@ void handle_client(SSL* ssl, int msg_queue_id)
 
     Response response;
     std::string body;
-    std::string file_path = "www" + http_request.path;
+    std::string file_path = "../www" + http_request.path;
     std::string mime_type = get_mime_type(file_path);
-    std::string file_extension = get_file_extension(file_path);
-
-
-    log_message(msg_queue_id, "Request received: " + http_request.path);
-    log_message(msg_queue_id, "File path: " + file_path);
-
-    std::string method = request_parser.get_method(http_request);
-    
-    if(method == "POST")
-    {
-        std::string boundary = request_parser.get_boundary(http_request);
-        log_message(msg_queue_id, "---------Boundary---------:" + boundary);
-        log_message(msg_queue_id, "POST request received");
-        std::string post_data = http_request.headers["Content-Length"];
-        log_message(msg_queue_id, "POST data: " + post_data);
-    }
-
-
     if (response.fileExists(file_path)) 
     {
         body = response.loadFile(file_path);
@@ -248,13 +157,6 @@ void handle_client(SSL* ssl, int msg_queue_id)
         body = response.loadFile(FILE_NOT_FOUND_PATH);
         log_message(msg_queue_id, "File not found: " + http_request.path);
     }
-
-    if (executable_types.count(file_extension) && response.fileExists(file_path)) 
-    {
-        mime_type = "text/plain";
-        body = execute_file(file_path, body, file_extension);
-    }
-
     if (http_request.path == "/") 
     {
         body = response.loadFile(INDEX_PATH);
