@@ -237,7 +237,7 @@ void handle_client(SSL* ssl, int msg_queue_id)
     int ssl_error = SSL_get_error(ssl, bytes);
     printf("\n\n\n\nSSL_read error (HEADERS): %d\n\n\n\n", ssl_error);
 
-    printf("BUFFER_STR Received: %s\n", buffer_str.c_str());
+    //printf("BUFFER_STR Received: %s\n", buffer_str.c_str());
     RequestParser request_parser = RequestParser(buffer_str);
     HttpRequest http_request = request_parser.parse();
 
@@ -257,7 +257,8 @@ void handle_client(SSL* ssl, int msg_queue_id)
         buffer_str.append(buffer, bytes);
         total_size += bytes;
     }
-
+    printf("WHOLE CONTENT: %s\n", buffer_str.c_str());
+    printf("WHOLE CONTENT SIZE: %d\n", buffer_str.size());
 
 
 
@@ -315,14 +316,20 @@ void handle_client(SSL* ssl, int msg_queue_id)
         }
 
         
-
-
-
+        printf("file content: %s\n", file_content.c_str());
         // Save the file
         std::ofstream output_file(filename, std::ios::binary);
         if (output_file.is_open()) 
         {
             output_file.write(file_content.c_str(), file_content.size());
+            // TODO: REMOVE BOUNDARY
+            // Remove the boundary with "--" at the end
+            size_t boundary_end = buffer_str.find(http_request.boundary + "--");
+            if (boundary_end != std::string::npos) 
+            {
+                buffer_str.erase(boundary_end, http_request.boundary.length() + 2); // +2 for "--"
+                output_file.write("\r\n", 2);
+            }
             output_file.close();
             log_message(msg_queue_id, "File saved: " + filename);
         } 
