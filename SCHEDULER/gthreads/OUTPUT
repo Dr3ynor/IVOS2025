@@ -1,0 +1,116 @@
+F Thread id = 1, val = 1 BEGINNING
+F Thread id = 2, val = 1 BEGINNING
+G Thread id = 1, val = 1 BEGINNING
+G Thread id = 2, val = 1 BEGINNING
+G Thread id = 2, val = 2 END
+F Thread id = 2, val = 2 END
+F Thread id = 1, val = 2 END
+G Thread id = 1, val = 2 END
+G Thread id = 2, val = 3 BEGINNING
+F Thread id = 1, val = 3 BEGINNING
+F Thread id = 2, val = 3 BEGINNING
+G Thread id = 1, val = 3 BEGINNING
+F Thread id = 1, val = 4 END
+G Thread id = 2, val = 4 END
+F Thread id = 2, val = 4 END
+G Thread id = 1, val = 4 END
+G Thread id = 2, val = 5 BEGINNING
+F Thread id = 1, val = 5 BEGINNING
+F Thread id = 2, val = 5 BEGINNING
+G Thread id = 1, val = 5 BEGINNING
+F Thread id = 1, val = 6 END
+G Thread id = 2, val = 6 END
+F Thread id = 2, val = 6 END
+G Thread id = 1, val = 6 END
+F Thread id = 1, val = 7 BEGINNING
+F Thread id = 2, val = 7 BEGINNING
+G Thread id = 2, val = 7 BEGINNING
+G Thread id = 1, val = 7 BEGINNING
+G Thread id = 2, val = 8 END
+F Thread id = 1, val = 8 END
+F Thread id = 2, val = 8 END
+G Thread id = 1, val = 8 END
+G Thread id = 2, val = 9 BEGINNING
+F Thread id = 1, val = 9 BEGINNING
+F Thread id = 2, val = 9 BEGINNING
+G Thread id = 1, val = 9 BEGINNING
+G Thread id = 2, val = 10 END
+F Thread id = 1, val = 10 END
+F Thread id = 2, val = 10 END
+G Thread id = 1, val = 10 END
+G Thread id = 2, val = 11 BEGINNING
+F Thread id = 1, val = 11 BEGINNING
+F Thread id = 2, val = 11 BEGINNING
+G Thread id = 1, val = 11 BEGINNING
+G Thread id = 2, val = 12 END
+F Thread id = 1, val = 12 END
+F Thread id = 2, val = 12 END
+G Thread id = 1, val = 12 END
+G Thread id = 2, val = 13 BEGINNING
+F Thread id = 2, val = 13 BEGINNING
+F Thread id = 1, val = 13 BEGINNING
+G Thread id = 1, val = 13 BEGINNING
+G Thread id = 2, val = 14 END
+F Thread id = 2, val = 14 END
+F Thread id = 1, val = 14 END
+G Thread id = 1, val = 14 END
+G Thread id = 2, val = 15 BEGINNING
+F Thread id = 2, val = 15 BEGINNING
+F Thread id = 1, val = 15 BEGINNING
+G Thread id = 1, val = 15 BEGINNING
+G Thread id = 2, val = 16 END
+F Thread id = 2, val = 16 END
+F Thread id = 1, val = 16 END
+G Thread id = 1, val = 16 END
+
+----- Thread Statistics -----
+ID     State        Runtime(μs) Waittime(μs) Avg Run(μs) Avg Wait(μs) Var Run      Var Wait    
+0      Ready        2558         3441430      1.57         2117.65      3.67         5835.13     
+1      Running      849394       2594401      522.55       1595.57      568.63       6516.50     
+2      Ready        849633       2593774      522.85       1595.36      1132.91      5357.69     
+3      Ready        848577       2594792      522.20       1596.31      902.02       5311.75     
+4      Ready        852438       2590735      524.58       1594.14      2168.42      3003.40     
+--- Additional Thread Info ---
+Thread 0:
+  Min runtime: 0 μs, Max runtime: 64 μs
+  Min waittime: 1957 μs, Max waittime: 3233 μs
+  Run count: 1626, Wait count: 1625
+  RSP: 7ffcf060dcf8
+Thread 1:
+  Min runtime: 350 μs, Max runtime: 1016 μs
+  Min waittime: 37 μs, Max waittime: 2720 μs
+  Run count: 1625, Wait count: 1626
+  RSP: 7f8cf3cc6988
+Thread 2:
+  Min runtime: 474 μs, Max runtime: 1634 μs
+  Min waittime: 571 μs, Max waittime: 2660 μs
+  Run count: 1625, Wait count: 1625
+  RSP: 7f8cf38c5988
+Thread 3:
+  Min runtime: 502 μs, Max runtime: 1579 μs
+  Min waittime: 1094 μs, Max waittime: 2865 μs
+  Run count: 1625, Wait count: 1625
+  RSP: 7f8cf34c4988
+Thread 4:
+  Min runtime: 447 μs, Max runtime: 1478 μs
+  Min waittime: 1559 μs, Max waittime: 2710 μs
+  Run count: 1625, Wait count: 1625
+  RSP: 7f8cf30c3988
+-----------------------------
+G Thread id = 2, val = 17 BEGINNING
+F Thread id = 2, val = 17 BEGINNING
+F Thread id = 1, val = 17 BEGINNING
+G Thread id = 1, val = 17 BEGINNING
+G Thread id = 2, val = 18 END
+F Thread id = 2, val = 18 END
+F Thread id = 1, val = 18 END
+G Thread id = 1, val = 18 END
+G Thread id = 2, val = 19 BEGINNING
+F Thread id = 2, val = 19 BEGINNING
+F Thread id = 1, val = 19 BEGINNING
+G Thread id = 1, val = 19 BEGINNING
+G Thread id = 2, val = 20 END
+F Thread id = 2, val = 20 END
+F Thread id = 1, val = 20 END
+G Thread id = 1, val = 20 END
+G Thread id 

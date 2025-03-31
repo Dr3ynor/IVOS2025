@@ -209,22 +209,6 @@ std::string get_file_extension(const std::string& file_path)
     return "";
 }
 
-
-size_t find_rnrn(std::string buffer_str)
-{
-    size_t pos = buffer_str.find("\r\n\r\n");
-    if (pos != std::string::npos)
-    {
-        std::cout << "\n\nFound RNRN at position: " << pos << std::endl;
-    } 
-    else 
-    {
-        std::cout << "\n\nRNRN not found in the buffer." << std::endl;
-    }
-    size_t end_pos = pos + 4; // 4 = length of "\r\n\r\n"
-    return end_pos;
-}
-
 void handle_client(SSL* ssl, int msg_queue_id) 
 {
     int total_size = 0;
@@ -234,131 +218,89 @@ void handle_client(SSL* ssl, int msg_queue_id)
     int bytes = SSL_read(ssl, buffer, sizeof(buffer));
     buffer_str.append(buffer, bytes);
 
-    int ssl_error = SSL_get_error(ssl, bytes);
-    printf("\n\n\n\nSSL_read error (HEADERS): %d\n\n\n\n", ssl_error);
-
-    //printf("BUFFER_STR Received: %s\n", buffer_str.c_str());
     RequestParser request_parser = RequestParser(buffer_str);
     HttpRequest http_request = request_parser.parse();
 
-    std::cout << "\n\nCONTENT LENGTH: " << http_request.headers["Content-Length"] << std::endl;
 
-    std::cout << "\n\nCONTENT ARRIVED LEN: " << buffer_str.length() << std::endl;
-    std::cout << "\n\nCONTENT ARRIVED SIZE: " << buffer_str.size() << std::endl;
-    std::cout << "\n\nBYTES READ: " << bytes << std::endl;
-    printf("BOUNDARY: %s\n", http_request.boundary.c_str());
-
-    total_size += bytes;
-    bytes = 0;
-    
-    while (total_size < std::stoi(http_request.headers["Content-Length"])) 
+    if (http_request.method == "POST") 
     {
-        bytes = SSL_read(ssl, buffer, sizeof(buffer));
-        buffer_str.append(buffer, bytes);
         total_size += bytes;
-    }
-    printf("WHOLE CONTENT: %s\n", buffer_str.c_str());
-    printf("WHOLE CONTENT SIZE: %d\n", buffer_str.size());
-
-
-
-    while (true) 
-    {
-        printf("a\n");
-        // Find the boundary
-        size_t boundary_pos = buffer_str.find(http_request.boundary);
-        if (boundary_pos == std::string::npos) 
-        {
-            printf("Boundary not found\n");
-            break; // No more boundaries, exit the loop
-        }
-
-        // Remove the boundary
-        buffer_str.erase(0, boundary_pos + http_request.boundary.length() + 2); // +2 for "\r\n"
-
-        // Find the end of the headers
-        size_t headers_end = buffer_str.find("\r\n\r\n");
-        if (headers_end == std::string::npos) 
-        {
-            break; // Malformed data, exit the loop
-        }
-
-        // Extract headers
-        std::string headers = buffer_str.substr(0, headers_end);
-        buffer_str.erase(0, headers_end + 4); // +4 for "\r\n\r\n"
-
-        // Find the filename
-        size_t filename_pos = headers.find("filename=\"");
-        if (filename_pos == std::string::npos) 
-        {
-            continue; // No filename, skip this part
-        }
-        filename_pos += 10; // Move past "filename=\""
-        size_t filename_end = headers.find("\"", filename_pos);
-        if (filename_end == std::string::npos) 
-        {
-            continue; // Malformed filename, skip this part
-        }
-        std::string filename = headers.substr(filename_pos, filename_end - filename_pos);
-        printf("FILENAME: %s\n", filename.c_str());
-        // Find the next boundary
-        size_t next_boundary = buffer_str.find(http_request.boundary);
-        std::string file_content;
-        if (next_boundary != std::string::npos) 
-        {
-            file_content = buffer_str.substr(0, next_boundary - 2); // -2 to remove "\r\n"
-            buffer_str.erase(0, next_boundary);
-        } 
-        else 
-        {
-            file_content = buffer_str; // Last file
-            buffer_str.clear();
-        }
-
+        bytes = 0;
         
-        printf("file content: %s\n", file_content.c_str());
-        // Save the file
-        std::ofstream output_file(filename, std::ios::binary);
-        if (output_file.is_open()) 
+        while (total_size < std::stoi(http_request.headers["Content-Length"])) 
         {
-            output_file.write(file_content.c_str(), file_content.size());
-            // TODO: REMOVE BOUNDARY
-            // Remove the boundary with "--" at the end
-            size_t boundary_end = buffer_str.find(http_request.boundary + "--");
-            if (boundary_end != std::string::npos) 
-            {
-                buffer_str.erase(boundary_end, http_request.boundary.length() + 2); // +2 for "--"
-                output_file.write("\r\n", 2);
-            }
-            output_file.close();
-            log_message(msg_queue_id, "File saved: " + filename);
-        } 
-        else 
-        {
-            log_message(msg_queue_id, "Failed to save file: " + filename);
+            bytes = SSL_read(ssl, buffer, sizeof(buffer));
+            buffer_str.append(buffer, bytes);
+            total_size += bytes;
+            printf("bytes: %d / %d\n", bytes,total_size);
         }
-        printf("b\n");
-    }
+        printf("http_request.method: %s\n", http_request.method.c_str());
 
-    // TODO: smazat poslední boundary.. zkusit poslat víc souborů... rozchodit to tak aby fungoval jak POST tak GET (nějaký if na metodu)
-
-
-
-    /*
-    printf("--------------------\n");
-    printf("--------------------\n");
-    std::cout << "Method: " << http_request.method << "\n";
-    std::cout << "Path: " << http_request.path << "\n";
-    std::cout << "Version: " << http_request.version << "\n";
-    std::cout << "Boundary: " << http_request.boundary << "\n";
+        while (true) 
+        {
+            // Find the boundary
+            size_t boundary_pos = buffer_str.find(http_request.boundary);
+            if (boundary_pos == std::string::npos) 
+            {
+                printf("Boundary not found\n");
+                break; // No more boundaries, exit the loop
+            }
     
-    for (const auto& [key, value] : http_request.headers) 
-    {
-        std::cout << "Header[" << key << "]: " << value << "\n";
+            // Remove the boundary
+            buffer_str.erase(0, boundary_pos + http_request.boundary.length() + 2); // +2 for "\r\n"
+    
+            // Find the end of the headers
+            size_t headers_end = buffer_str.find("\r\n\r\n");
+            if (headers_end == std::string::npos) 
+            {
+                break; // Malformed data, exit the loop
+            }
+    
+            // Extract headers
+            std::string headers = buffer_str.substr(0, headers_end);
+            buffer_str.erase(0, headers_end + 4); // +4 for "\r\n\r\n"
+    
+            // Find the filename
+            size_t filename_pos = headers.find("filename=\"");
+            if (filename_pos == std::string::npos) 
+            {
+                continue; // No filename, skip this part
+            }
+            filename_pos += 10; // Move past "filename=\""
+            size_t filename_end = headers.find("\"", filename_pos);
+            if (filename_end == std::string::npos) 
+            {
+                continue; // Malformed filename, skip this part
+            }
+            std::string filename = headers.substr(filename_pos, filename_end - filename_pos);
+    
+            // Find the next boundary
+            size_t next_boundary = buffer_str.find(http_request.boundary);
+            std::string file_content;
+            if (next_boundary != std::string::npos) 
+            {
+                file_content = buffer_str.substr(0, next_boundary - 2); // -2 to remove "\r\n"
+                buffer_str.erase(0, next_boundary);
+            } 
+            else 
+            {
+                file_content = buffer_str; // Last file
+                buffer_str.clear();
+            }
+    
+            std::ofstream output_file(filename, std::ios::binary);
+            if (output_file.is_open()) 
+            {
+                output_file.write(file_content.c_str(), file_content.size());
+                output_file.close();
+                log_message(msg_queue_id, "File saved: " + filename);
+            } 
+            else 
+            {
+                log_message(msg_queue_id, "Failed to save file: " + filename);
+            }
+        }
     }
-    printf("--------------------\n");
-    printf("--------------------\n");*/
-
 
     Response response;
     std::string body;
@@ -366,45 +308,35 @@ void handle_client(SSL* ssl, int msg_queue_id)
     std::string mime_type = get_mime_type(file_path);
     std::string file_extension = get_file_extension(file_path);
 
-
     log_message(msg_queue_id, "Request received: " + http_request.path);
     log_message(msg_queue_id, "File path: " + file_path);
+
+    if (response.fileExists(file_path)) 
+    {
+        body = response.loadFile(file_path);
+        log_message(msg_queue_id, "File found: " + file_path);
+    } 
+    else 
+    {
+        body = response.loadFile(FILE_NOT_FOUND_PATH);
+        log_message(msg_queue_id, "File not found: " + http_request.path);
+    }
+
+    if (executable_types.count(file_extension) && response.fileExists(file_path)) 
+    {
+        mime_type = "text/plain";
+        body = execute_file(file_path, body, file_extension);
+    }
+
+    if (http_request.path == "/") 
+    {
+        body = response.loadFile(INDEX_PATH);
+        log_message(msg_queue_id, "Index file requested");
+    }
     
-    if(http_request.method == "POST")
-    {
-        request_parser.save_files(request_parser.parse_files());
-        log_message(msg_queue_id, "POST request received");
-        std::string post_data = http_request.headers["Content-Length"];
-        log_message(msg_queue_id, "POST data: " + post_data);
-    }
-    else
-    {
-        if (response.fileExists(file_path)) 
-        {
-            body = response.loadFile(file_path);
-            log_message(msg_queue_id, "File found: " + file_path);
-        } 
-        else 
-        {
-            body = response.loadFile(FILE_NOT_FOUND_PATH);
-            log_message(msg_queue_id, "File not found: " + http_request.path);
-        }
+    std::string response_message = response.buildResponse(body, mime_type);
+    SSL_write(ssl, response_message.c_str(), response_message.length());
 
-        if (executable_types.count(file_extension) && response.fileExists(file_path)) 
-        {
-            mime_type = "text/plain";
-            body = execute_file(file_path, body, file_extension);
-        }
-
-        if (http_request.path == "/") 
-        {
-            body = response.loadFile(INDEX_PATH);
-            log_message(msg_queue_id, "Index file requested");
-        }
-        
-        std::string response_message = response.buildResponse(body, mime_type);
-        SSL_write(ssl, response_message.c_str(), response_message.length());
-    }
     SSL_shutdown(ssl);
     SSL_free(ssl);
 }

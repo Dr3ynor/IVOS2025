@@ -1,0 +1,5 @@
+{
+    "files.associations": {
+        "gthr_struct.h": "c"
+    }
+}
