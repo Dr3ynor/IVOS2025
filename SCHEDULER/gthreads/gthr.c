@@ -6,10 +6,10 @@
 #include <signal.h>
 #include <unistd.h>
 #include <errno.h>
+
 #include <time.h>
 #include <sys/time.h>
 #include <math.h>
-
 #include <limits.h>
 
 
@@ -124,6 +124,7 @@ void gt_print_stats() {
         }
     }
     printf("-----------------------------\n");
+    exit(0); // Exit after printing stats
 }
 
 // initialize first thread as current context
