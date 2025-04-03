@@ -12,9 +12,17 @@
 #include <math.h>
 #include <limits.h>
 
-
 #include "gthr.h"
 #include "gthr_struct.h"
+
+// ANSI color codes
+#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN   "\x1b[32m"
+#define ANSI_COLOR_YELLOW  "\x1b[33m"
+#define ANSI_COLOR_BLUE    "\x1b[34m"
+#define ANSI_COLOR_MAGENTA "\x1b[35m"
+#define ANSI_COLOR_CYAN    "\x1b[36m"
+#define ANSI_COLOR_RESET   "\x1b[0m"
 
 // Helper function to get time difference in microseconds
 long time_diff_us(struct timeval *start, struct timeval *end) {
@@ -44,15 +52,103 @@ void gt_init_stats(struct gt_stats *stats) {
     stats->wait_count = 0;
 }
 
+// Function to calculate variance
+double calculate_variance(long sum, long sum_squared, long count) {
+    if (count <= 1) {
+        return 0.0;
+    }
+    double mean = (double)sum / count;
+    return ((double)sum_squared / count) - (mean * mean);
+}
+
+// Function to get color based on value relative to min and max
+// value = current value, min = minimum value, max = maximum value
+// Returns color code string
+const char* get_color_for_value(long value, long min, long max) {
+    // If min and max are the same, or value is out of range, use reset color
+    if (min == max || value < min || value > max) {
+        return ANSI_COLOR_RESET;
+    }
+    
+    // Calculate percentage of value between min and max
+    double percentage = (double)(value - min) / (max - min);
+    
+    // Green for lowest values (best performance)
+    if (percentage < 0.33) {
+        return ANSI_COLOR_GREEN;
+    } 
+    // Yellow for middle values
+    else if (percentage < 0.66) {
+        return ANSI_COLOR_YELLOW;
+    }
+    // Red for highest values (worst performance)
+    else {
+        return ANSI_COLOR_RED;
+    }
+}
+
 // function triggered periodically by timer (SIGALRM)
 void gt_alarm_handle(int sig) {
 	gt_schedule();
+}
+
+// Function to get global min/max values for runtime and waittime
+void get_global_min_max(long *min_runtime, long *max_runtime, long *min_waittime, long *max_waittime) {
+    *min_runtime = LONG_MAX;
+    *max_runtime = 0;
+    *min_waittime = LONG_MAX;
+    *max_waittime = 0;
+    
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    
+    for (int i = 0; i < MaxGThreads; i++) {
+        if (gt_table[i].state == Unused && gt_table[i].stats.run_count == 0) {
+            continue;
+        }
+        
+        // Calculate current metrics if thread is active
+        long current_runtime = gt_table[i].state == Running ? 
+            time_diff_us(&gt_table[i].stats.last_run, &now) : 0;
+        
+        // Update min/max runtime
+        long thread_min_runtime = gt_table[i].stats.min_runtime;
+        long thread_max_runtime = gt_table[i].stats.max_runtime;
+        
+        if (thread_min_runtime != LONG_MAX && thread_min_runtime < *min_runtime) {
+            *min_runtime = thread_min_runtime;
+        }
+        
+        if (thread_max_runtime > *max_runtime) {
+            *max_runtime = thread_max_runtime;
+        }
+        
+        // Update min/max waittime
+        long thread_min_waittime = gt_table[i].stats.min_waittime;
+        long thread_max_waittime = gt_table[i].stats.max_waittime;
+        
+        if (thread_min_waittime != LONG_MAX && thread_min_waittime < *min_waittime) {
+            *min_waittime = thread_min_waittime;
+        }
+        
+        if (thread_max_waittime > *max_waittime) {
+            *max_waittime = thread_max_waittime;
+        }
+    }
+    
+    // Handle case where no valid values were found
+    if (*min_runtime == LONG_MAX) *min_runtime = 0;
+    if (*min_waittime == LONG_MAX) *min_waittime = 0;
 }
 
 // SIGINT handler to print thread statistics
 void gt_print_stats() {
     struct timeval now;
     gettimeofday(&now, NULL);
+    
+    // Get global min/max values for color coding
+    long global_min_runtime, global_max_runtime, global_min_waittime, global_max_waittime;
+    get_global_min_max(&global_min_runtime, &global_max_runtime, &global_min_waittime, &global_max_waittime);
     
     printf("\n----- Thread Statistics -----\n");
     printf("%-6s %-12s %-12s %-12s %-12s %-12s %-12s %-12s\n", 
@@ -82,42 +178,109 @@ void gt_print_stats() {
             (double)gt_table[i].stats.sum_waittime / gt_table[i].stats.wait_count : 0;
         
         // Calculate variances
-        double var_runtime = 0;
-        if (gt_table[i].stats.run_count > 1) {
-            var_runtime = ((double)gt_table[i].stats.sum_squared_runtime / gt_table[i].stats.run_count) - 
-                          (avg_runtime * avg_runtime);
-        }
+        double var_runtime = calculate_variance(
+            gt_table[i].stats.sum_runtime,
+            gt_table[i].stats.sum_squared_runtime,
+            gt_table[i].stats.run_count
+        );
         
-        double var_waittime = 0;
-        if (gt_table[i].stats.wait_count > 1) {
-            var_waittime = ((double)gt_table[i].stats.sum_squared_waittime / gt_table[i].stats.wait_count) - 
-                          (avg_waittime * avg_waittime);
-        }
+        double var_waittime = calculate_variance(
+            gt_table[i].stats.sum_waittime,
+            gt_table[i].stats.sum_squared_waittime,
+            gt_table[i].stats.wait_count
+        );
         
-        // Get state as string
+        // Get state as string and color
         const char *state;
+        const char *state_color;
         switch (gt_table[i].state) {
-            case Running: state = "Running"; break;
-            case Ready: state = "Ready"; break;
-            case Unused: state = "Unused"; break;
-            default: state = "Unknown";
+            case Running: 
+                state = "Running"; 
+                state_color = ANSI_COLOR_GREEN;  // Running threads in green
+                break;
+            case Ready: 
+                state = "Ready"; 
+                state_color = ANSI_COLOR_BLUE;   // Ready threads in blue
+                break;
+            case Unused: 
+                state = "Unused"; 
+                state_color = ANSI_COLOR_MAGENTA; // Unused threads in magenta
+                break;
+            default: 
+                state = "Unknown";
+                state_color = ANSI_COLOR_YELLOW; // Unknown state in yellow
         }
         
-        printf("%-6d %-12s %-12ld %-12ld %-12.2f %-12.2f %-12.2f %-12.2f\n", 
-               i, state, total_runtime, total_waittime, 
-               avg_runtime, avg_waittime, var_runtime, var_waittime);
+        // Get colors for runtime and waittime
+        const char *runtime_color = get_color_for_value(total_runtime, global_min_runtime, global_max_runtime);
+        const char *waittime_color = get_color_for_value(total_waittime, global_min_waittime, global_max_waittime);
+        const char *avg_runtime_color = get_color_for_value(avg_runtime, 
+                                                          global_min_runtime/gt_table[i].stats.run_count > 0 ? gt_table[i].stats.run_count : 1, 
+                                                          global_max_runtime/gt_table[i].stats.run_count > 0 ? gt_table[i].stats.run_count : 1);
+        const char *avg_waittime_color = get_color_for_value(avg_waittime, 
+                                                           global_min_waittime/gt_table[i].stats.wait_count > 0 ? gt_table[i].stats.wait_count : 1, 
+                                                           global_max_waittime/gt_table[i].stats.wait_count > 0 ? gt_table[i].stats.wait_count : 1);
+        
+        printf("%-6d %s%-12s%s %s%-12ld%s %s%-12ld%s %s%-12.2f%s %s%-12.2f%s %-12.2f %-12.2f\n", 
+               i, 
+               state_color, state, ANSI_COLOR_RESET,
+               runtime_color, total_runtime, ANSI_COLOR_RESET,
+               waittime_color, total_waittime, ANSI_COLOR_RESET,
+               avg_runtime_color, avg_runtime, ANSI_COLOR_RESET,
+               avg_waittime_color, avg_waittime, ANSI_COLOR_RESET,
+               var_runtime, var_waittime);
     }
     
     printf("--- Additional Thread Info ---\n");
     for (int i = 0; i < MaxGThreads; i++) {
         if (gt_table[i].state != Unused || gt_table[i].stats.run_count > 0) {
-            printf("Thread %d:\n", i);
-            printf("  Min runtime: %ld μs, Max runtime: %ld μs\n", 
+            const char *state_color;
+            switch (gt_table[i].state) {
+                case Running: state_color = ANSI_COLOR_GREEN; break;
+                case Ready: state_color = ANSI_COLOR_BLUE; break;
+                case Unused: state_color = ANSI_COLOR_MAGENTA; break;
+                default: state_color = ANSI_COLOR_YELLOW;
+            }
+            
+            printf("Thread %d (%s%s%s):\n", i, 
+                   state_color, 
+                   gt_table[i].state == Running ? "Running" : 
+                   gt_table[i].state == Ready ? "Ready" : 
+                   gt_table[i].state == Unused ? "Unused" : "Unknown",
+                   ANSI_COLOR_RESET);
+            
+            // Get colors for min/max runtime
+            const char *min_runtime_color = get_color_for_value(
+                gt_table[i].stats.min_runtime == LONG_MAX ? 0 : gt_table[i].stats.min_runtime,
+                global_min_runtime, global_max_runtime);
+            const char *max_runtime_color = get_color_for_value(
+                gt_table[i].stats.max_runtime,
+                global_min_runtime, global_max_runtime);
+            
+            // Get colors for min/max waittime
+            const char *min_waittime_color = get_color_for_value(
+                gt_table[i].stats.min_waittime == LONG_MAX ? 0 : gt_table[i].stats.min_waittime,
+                global_min_waittime, global_max_waittime);
+            const char *max_waittime_color = get_color_for_value(
+                gt_table[i].stats.max_waittime,
+                global_min_waittime, global_max_waittime);
+            
+            printf("  Min runtime: %s%ld%s μs, Max runtime: %s%ld%s μs\n", 
+                   min_runtime_color, 
                    gt_table[i].stats.min_runtime == LONG_MAX ? 0 : gt_table[i].stats.min_runtime, 
-                   gt_table[i].stats.max_runtime);
-            printf("  Min waittime: %ld μs, Max waittime: %ld μs\n", 
+                   ANSI_COLOR_RESET,
+                   max_runtime_color,
+                   gt_table[i].stats.max_runtime,
+                   ANSI_COLOR_RESET);
+            
+            printf("  Min waittime: %s%ld%s μs, Max waittime: %s%ld%s μs\n", 
+                   min_waittime_color,
                    gt_table[i].stats.min_waittime == LONG_MAX ? 0 : gt_table[i].stats.min_waittime, 
-                   gt_table[i].stats.max_waittime);
+                   ANSI_COLOR_RESET,
+                   max_waittime_color,
+                   gt_table[i].stats.max_waittime,
+                   ANSI_COLOR_RESET);
+            
             printf("  Run count: %ld, Wait count: %ld\n", 
                    gt_table[i].stats.run_count, gt_table[i].stats.wait_count);
             printf("  RSP: %lx\n", gt_table[i].ctx.rsp);
