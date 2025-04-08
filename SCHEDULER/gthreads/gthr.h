@@ -2,7 +2,6 @@ enum {
     MaxGThreads = 5,     // Maximum number of threads, used as array size for gttbl
     StackSize = 0x400000, // Size of stack of each thread
     MaxPriority = 20,    // Maximum priority level (higher number = higher priority)
-    StarvationThreshold = 5  // Number of times a thread can be skipped before priority boost
 };
 
 // Stats structure to track thread performance metrics
@@ -53,7 +52,6 @@ struct gt {
 	// Priority-related fields
 	int base_priority;           // Original assigned priority
 	int current_priority;        // Current priority (may be boosted to prevent starvation)
-	int skip_count;              // Number of times thread was skipped due to priority
 	struct timeval last_scheduled; // Last time this thread was scheduled
 };
 
@@ -68,3 +66,4 @@ void gt_reset_sig(int sig);                                             // reset
 void gt_alarm_handle(int sig);                                          // periodically triggered by alarm
 int gt_uninterruptible_nanosleep(time_t sec, long nanosec);             // uninterruptible sleep
 void gt_print_stats();                                                  // print thread statistics on SIGINT
+void select_algorithm();                                                  // select scheduling algorithm

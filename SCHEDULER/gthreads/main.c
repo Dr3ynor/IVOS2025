@@ -41,6 +41,7 @@ void g(void) {
 }
 
 int main(void) {
+	select_algorithm();
 	gt_init();            // initialize threads, see gthr.c
 	gt_create(f, 1);         // set f() as first thread
 	gt_create(f, MaxPriority);         // set f() as second thread
