@@ -59,11 +59,22 @@ void select_algorithm()
 
 
 // Get time difference in microseconds
-long time_diff_us(struct timeval *start, struct timeval *end)
+/*long time_diff_us(struct timeval *start, struct timeval *end)
 {
     return ((end->tv_sec - start->tv_sec) * 1000000) +
            (end->tv_usec - start->tv_usec);
+}*/
+
+long time_diff_us(struct timeval *start, struct timeval *end)
+{
+    long diff = ((end->tv_sec - start->tv_sec) * 1000000) +
+                (end->tv_usec - start->tv_usec);
+    // Ensure time difference is never negative
+    return diff > 0 ? diff : 0;
 }
+
+
+
 
 // Initialize thread statistics
 void gt_init_stats(struct gt_stats *stats)
@@ -198,7 +209,7 @@ void gt_print_stats()
 
     printf("\n----- Thread Statistics -----\n");
     printf("%-6s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-8s\n",
-           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Var Run", "Var Wait", "Priority");
+           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Var Run", "Var Wait", "Curr/Base Priority");
 
     for (int i = 0; i < MaxGThreads; i++)
     {
