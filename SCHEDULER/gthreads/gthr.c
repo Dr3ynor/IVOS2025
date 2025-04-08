@@ -15,7 +15,6 @@
 #include "gthr.h"
 #include "gthr_struct.h"
 
-// ANSI color codes
 #define ANSI_COLOR_RED     "\x1b[31m"
 #define ANSI_COLOR_GREEN   "\x1b[32m"
 #define ANSI_COLOR_YELLOW  "\x1b[33m"
@@ -24,11 +23,18 @@
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
-// Helper function to get time difference in microseconds
+
+// PriorityBased
+// RoundRobin
+
+char *current_algorithm = "PriorityBased"; // Default scheduling algorithm
+
+// Get time difference in microseconds
 long time_diff_us(struct timeval *start, struct timeval *end) {
     return ((end->tv_sec - start->tv_sec) * 1000000) + 
            (end->tv_usec - start->tv_usec);
 }
+
 
 // Initialize thread statistics
 void gt_init_stats(struct gt_stats *stats) {
@@ -52,36 +58,29 @@ void gt_init_stats(struct gt_stats *stats) {
     stats->wait_count = 0;
 }
 
-// Function to calculate variance
 double calculate_variance(long sum, long sum_squared, long count) {
-    if (count <= 1) {
+    if(count <= 1) {
         return 0.0;
     }
     double mean = (double)sum / count;
     return ((double)sum_squared / count) - (mean * mean);
 }
 
-// Function to get color based on value relative to min and max
-// value = current value, min = minimum value, max = maximum value
-// Returns color code string
 const char* get_color_for_value(long value, long min, long max) {
     // If min and max are the same, or value is out of range, use reset color
-    if (min == max || value < min || value > max) {
+    if(min == max || value < min || value > max) {
         return ANSI_COLOR_RESET;
     }
     
     // Calculate percentage of value between min and max
     double percentage = (double)(value - min) / (max - min);
     
-    // Green for lowest values (best performance)
-    if (percentage < 0.33) {
+    if(percentage < 0.33) {
         return ANSI_COLOR_GREEN;
     } 
-    // Yellow for middle values
-    else if (percentage < 0.66) {
+    else if(percentage < 0.66) {
         return ANSI_COLOR_YELLOW;
     }
-    // Red for highest values (worst performance)
     else {
         return ANSI_COLOR_RED;
     }
@@ -103,10 +102,11 @@ void get_global_min_max(long *min_runtime, long *max_runtime, long *min_waittime
     gettimeofday(&now, NULL);
     
     for (int i = 0; i < MaxGThreads; i++) {
-        if (gt_table[i].state == Unused && gt_table[i].stats.run_count == 0) {
+        if(gt_table[i].state == Unused && gt_table[i].stats.run_count == 0) {
             continue;
         }
-        
+
+
         // Calculate current metrics if thread is active
         long current_runtime = gt_table[i].state == Running ? 
             time_diff_us(&gt_table[i].stats.last_run, &now) : 0;
@@ -115,11 +115,11 @@ void get_global_min_max(long *min_runtime, long *max_runtime, long *min_waittime
         long thread_min_runtime = gt_table[i].stats.min_runtime;
         long thread_max_runtime = gt_table[i].stats.max_runtime;
         
-        if (thread_min_runtime != LONG_MAX && thread_min_runtime < *min_runtime) {
+        if(thread_min_runtime != LONG_MAX && thread_min_runtime < *min_runtime) {
             *min_runtime = thread_min_runtime;
         }
         
-        if (thread_max_runtime > *max_runtime) {
+        if(thread_max_runtime > *max_runtime) {
             *max_runtime = thread_max_runtime;
         }
         
@@ -127,18 +127,18 @@ void get_global_min_max(long *min_runtime, long *max_runtime, long *min_waittime
         long thread_min_waittime = gt_table[i].stats.min_waittime;
         long thread_max_waittime = gt_table[i].stats.max_waittime;
         
-        if (thread_min_waittime != LONG_MAX && thread_min_waittime < *min_waittime) {
+        if(thread_min_waittime != LONG_MAX && thread_min_waittime < *min_waittime) {
             *min_waittime = thread_min_waittime;
         }
         
-        if (thread_max_waittime > *max_waittime) {
+        if(thread_max_waittime > *max_waittime) {
             *max_waittime = thread_max_waittime;
         }
     }
     
     // Handle case where no valid values were found
-    if (*min_runtime == LONG_MAX) *min_runtime = 0;
-    if (*min_waittime == LONG_MAX) *min_waittime = 0;
+    if(*min_runtime == LONG_MAX) *min_runtime = 0;
+    if(*min_waittime == LONG_MAX) *min_waittime = 0;
 }
 
 // SIGINT handler to print thread statistics
@@ -151,11 +151,11 @@ void gt_print_stats() {
     get_global_min_max(&global_min_runtime, &global_max_runtime, &global_min_waittime, &global_max_waittime);
     
     printf("\n----- Thread Statistics -----\n");
-    printf("%-6s %-12s %-12s %-12s %-12s %-12s %-12s %-12s\n", 
-           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Var Run", "Var Wait");
+    printf("%-6s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-8s\n", 
+           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Var Run", "Var Wait", "Priority");
     
     for (int i = 0; i < MaxGThreads; i++) {
-        if (gt_table[i].state == Unused && gt_table[i].stats.run_count == 0) {
+        if(gt_table[i].state == Unused && gt_table[i].stats.run_count == 0) {
             continue; // Skip unused threads that have never run
         }
         
@@ -166,10 +166,19 @@ void gt_print_stats() {
         long current_waittime = gt_table[i].state == Ready ? 
             time_diff_us(&gt_table[i].stats.last_ready, &now) : 0;
         
+        // Check for negative values
+        if(current_runtime < 0){
+            current_runtime = 0;
+        }
+        
+        if(current_waittime < 0) {
+            current_waittime = 0;
+        }
+
         // Calculate total runtime and waittime including current period
         long total_runtime = gt_table[i].stats.total_runtime + current_runtime;
         long total_waittime = gt_table[i].stats.total_waittime + current_waittime;
-        
+
         // Calculate averages
         double avg_runtime = gt_table[i].stats.run_count > 0 ? 
             (double)gt_table[i].stats.sum_runtime / gt_table[i].stats.run_count : 0;
@@ -189,26 +198,28 @@ void gt_print_stats() {
             gt_table[i].stats.sum_squared_waittime,
             gt_table[i].stats.wait_count
         );
-        
+        var_runtime = sqrt(var_runtime);
+        var_waittime = sqrt(var_waittime);
+
         // Get state as string and color
         const char *state;
         const char *state_color;
         switch (gt_table[i].state) {
             case Running: 
                 state = "Running"; 
-                state_color = ANSI_COLOR_GREEN;  // Running threads in green
+                state_color = ANSI_COLOR_GREEN;
                 break;
             case Ready: 
                 state = "Ready"; 
-                state_color = ANSI_COLOR_BLUE;   // Ready threads in blue
+                state_color = ANSI_COLOR_BLUE;
                 break;
             case Unused: 
                 state = "Unused"; 
-                state_color = ANSI_COLOR_MAGENTA; // Unused threads in magenta
+                state_color = ANSI_COLOR_MAGENTA;
                 break;
             default: 
                 state = "Unknown";
-                state_color = ANSI_COLOR_YELLOW; // Unknown state in yellow
+                state_color = ANSI_COLOR_YELLOW;
         }
         
         // Get colors for runtime and waittime
@@ -221,19 +232,35 @@ void gt_print_stats() {
                                                            global_min_waittime/gt_table[i].stats.wait_count > 0 ? gt_table[i].stats.wait_count : 1, 
                                                            global_max_waittime/gt_table[i].stats.wait_count > 0 ? gt_table[i].stats.wait_count : 1);
         
-        printf("%-6d %s%-12s%s %s%-12ld%s %s%-12ld%s %s%-12.2f%s %s%-12.2f%s %-12.2f %-12.2f\n", 
+        // Priority color (red for low, yellow for medium, green for high)
+        const char *priority_color;
+        if (gt_table[i].current_priority > gt_table[i].base_priority) {
+            // Boosted priority
+            priority_color = ANSI_COLOR_CYAN;
+        } else if (gt_table[i].base_priority < MaxPriority/3) {
+            priority_color = ANSI_COLOR_RED;
+        } else if (gt_table[i].base_priority < 2*MaxPriority/3) {
+            priority_color = ANSI_COLOR_YELLOW;
+        } else {
+            priority_color = ANSI_COLOR_GREEN;
+        }
+        
+        printf("%-6d %s%-12s%s %s%-12ld%s %s%-12ld%s %s%-12.2f%s %s%-12.2f%s %-12.2f %-12.2f %s%d/%d%s\n", 
                i, 
                state_color, state, ANSI_COLOR_RESET,
                runtime_color, total_runtime, ANSI_COLOR_RESET,
                waittime_color, total_waittime, ANSI_COLOR_RESET,
                avg_runtime_color, avg_runtime, ANSI_COLOR_RESET,
                avg_waittime_color, avg_waittime, ANSI_COLOR_RESET,
-               var_runtime, var_waittime);
+               var_runtime, var_waittime,
+               priority_color, gt_table[i].current_priority, gt_table[i].base_priority, ANSI_COLOR_RESET);
     }
     
     printf("--- Additional Thread Info ---\n");
+    printf("Current scheduling algorithm: %s\n", current_algorithm);
+    
     for (int i = 0; i < MaxGThreads; i++) {
-        if (gt_table[i].state != Unused || gt_table[i].stats.run_count > 0) {
+        if(gt_table[i].state != Unused || gt_table[i].stats.run_count > 0) {
             const char *state_color;
             switch (gt_table[i].state) {
                 case Running: state_color = ANSI_COLOR_GREEN; break;
@@ -283,6 +310,8 @@ void gt_print_stats() {
             
             printf("  Run count: %ld, Wait count: %ld\n", 
                    gt_table[i].stats.run_count, gt_table[i].stats.wait_count);
+            printf("  Base priority: %d, Current priority: %d, Skip count: %d\n", 
+                   gt_table[i].base_priority, gt_table[i].current_priority, gt_table[i].skip_count);
             printf("  RSP: %lx\n", gt_table[i].ctx.rsp);
         }
     }
@@ -292,18 +321,25 @@ void gt_print_stats() {
 
 // initialize first thread as current context
 void gt_init(void) {
-	gt_current = & gt_table[0];                                             // initialize current thread with thread #0
-	gt_current -> state = Running;                                          // set current to running
-    gt_init_stats(&gt_current->stats);                                      // initialize statistics for the first thread
-    gettimeofday(&gt_current->stats.last_run, NULL);                        // record start time for the first thread
+
+    gt_current = &gt_table[0];                                            // Initialize current thread with thread #0
+    gt_current->state = Running;                                          // Set current to running
+    gt_init_stats(&gt_current->stats);                                    // Initialize statistics for the first thread
+    gettimeofday(&gt_current->stats.last_run, NULL);                      // Record start time
     
-	signal(SIGALRM, gt_alarm_handle);                                       // register SIGALRM, signal from timer generated by alarm
-	signal(SIGINT, gt_print_stats);                                         // register SIGINT for statistics display
+    // Initialize priority
+    gt_current->base_priority = MaxPriority;
+    gt_current->current_priority = MaxPriority;
+    gt_current->skip_count = 0;
+    gettimeofday(&gt_current->last_scheduled, NULL);
+    
+    signal(SIGALRM, gt_alarm_handle);                                     // Register SIGALRM signal
+    signal(SIGINT, gt_print_stats);                                       // Register SIGINT for statistics display
 }
 
 // exit thread
 void __attribute__((noreturn)) gt_return(int ret) {
-	if (gt_current != & gt_table[0]) {                                      // if not an initial thread,
+	if(gt_current != & gt_table[0]) {                                      // if not an initial thread,
         // Update runtime before exiting
         struct timeval now;
         gettimeofday(&now, NULL);
@@ -321,12 +357,16 @@ void __attribute__((noreturn)) gt_return(int ret) {
 
 // switch from one thread to other
 bool gt_schedule(void) {
-	struct gt * p;
-	struct gt_context * old, * new;
+    struct gt *p;
+    struct gt *selected = NULL;
+    struct gt_context *old, *new;
     struct timeval now;
+    int highest_priority = 0;
+    long longest_wait = 0;
+    
     gettimeofday(&now, NULL);
 
-	gt_reset_sig(SIGALRM);                                                  // reset signal
+    gt_reset_sig(SIGALRM);                                                // Reset signal
 
     // Update statistics for current thread if it's running
     if (gt_current->state == Running) {
@@ -345,44 +385,80 @@ bool gt_schedule(void) {
         gt_current->stats.sum_squared_runtime += (runtime * runtime);
     }
 
-	p = gt_current;
-	while (p -> state != Ready) {                                           // iterate through gt_table[] until we find new thread in state Ready
-		if (++p == & gt_table[MaxGThreads])                             // at the end rotate to the beginning
-			p = & gt_table[0];
-		if (p == gt_current)                                            // did not find any other Ready threads
-			return false;
-	}
+    if (current_algorithm == "RoundRobin") {
+        p = gt_current;
+        while (p->state != Ready) {
+            if (++p == &gt_table[MaxGThreads])
+                p = &gt_table[0];
+            if (p == gt_current)
+                return false;  // No ready threads found
+        }
+        selected = p;
+    }
+    else if (current_algorithm == "PriorityBased") {
+        for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++) {
+            if (p->state == Ready) {
+                
+                // Apply starvation prevention: boost priority if skipped too many times
+                    p->current_priority++;
+
+                    // Cap the boosted priority
+                    if (p->current_priority > MaxPriority) {
+                        p->current_priority = MaxPriority;
+                    }
+                
+                
+                // Select thread based on a combination of priority and wait time
+                if (p->current_priority >= highest_priority) {
+                    highest_priority = p->current_priority;
+                    selected = p;
+                }
+            }
+        }
+    
+
+    
+            // If no thread was selected, return false
+            if (!selected) {
+                return false;
+            }
+
+    }
 
     // Update waittime for the thread that's about to run
-    if (p->state == Ready) {
-        long waittime = time_diff_us(&p->stats.last_ready, &now);
-        p->stats.total_waittime += waittime;
-        p->stats.wait_count++;
+    if (selected->state == Ready) {
+        long waittime = time_diff_us(&selected->stats.last_ready, &now);
+        selected->stats.total_waittime += waittime;
+        selected->stats.wait_count++;
         
         // Update min/max/sum/sum_squared for waittime
-        if (waittime < p->stats.min_waittime) {
-            p->stats.min_waittime = waittime;
+        if (waittime < selected->stats.min_waittime) {
+            selected->stats.min_waittime = waittime;
         }
-        if (waittime > p->stats.max_waittime) {
-            p->stats.max_waittime = waittime;
+        if (waittime > selected->stats.max_waittime) {
+            selected->stats.max_waittime = waittime;
         }
-        p->stats.sum_waittime += waittime;
-        p->stats.sum_squared_waittime += (waittime * waittime);
+        selected->stats.sum_waittime += waittime;
+        selected->stats.sum_squared_waittime += (waittime * waittime);
+        
+        selected->current_priority = selected->base_priority;  // Reset current priority to base
+
     }
 
-	if (gt_current -> state != Unused) {                                     // switch current to Ready and new thread found in previous loop to Running
-		gt_current -> state = Ready;
-        gettimeofday(&gt_current->stats.last_ready, NULL);                 // record when thread became ready
+    if (gt_current->state != Unused) {
+        gt_current->state = Ready;
+        gettimeofday(&gt_current->stats.last_ready, NULL);  // Record when thread became ready
     }
     
-	p -> state = Running;
-    gettimeofday(&p->stats.last_run, NULL);                                 // record when thread starts running
+    selected->state = Running;
+    gettimeofday(&selected->stats.last_run, NULL);         // Record when thread starts running
+    gettimeofday(&selected->last_scheduled, NULL);         // Update last scheduled time
     
-	old = & gt_current -> ctx;                                              // prepare pointers to context of current (will become old)
-	new = & p -> ctx;                                                       // and new to new thread found in previous loop
-	gt_current = p;                                                         // switch current indicator to new thread
-	gt_switch(old, new);                                                    // perform context switch (assembly in gtswtch.S)
-	return true;
+    old = &gt_current->ctx;                                 // Prepare pointers to context of current
+    new = &selected->ctx;                                  // and new thread
+    gt_current = selected;                                 // Switch current indicator to new thread
+    gt_switch(old, new);                                   // Perform context switch
+    return true;
 }
 
 // return function for terminating thread
@@ -391,35 +467,48 @@ void gt_stop(void) {
 }
 
 // create new thread by providing pointer to function that will act like "run" method
-int gt_create(void( * f)(void)) {
-	char * stack;
-	struct gt * p;
+int gt_create(void(*f)(void), int priority) {
+    char *stack;
+    struct gt *p;
 
-	for (p = & gt_table[0];; p++)                                           // find an empty slot
-		if (p == & gt_table[MaxGThreads])                               // if we have reached the end, gt_table is full and we cannot create a new thread
-			return -1;
-		else if (p -> state == Unused)
-			break;                                                  // new slot was found
+    // Validate priority
+    if (priority < 1 || priority > MaxPriority) {
+        priority = MaxPriority / 2;  // Default to medium priority if invalid
+    }
 
-	stack = malloc(StackSize);                                              // allocate memory for stack of newly created thread
-	if (!stack)
-		return -1;
+    for (p = &gt_table[0];; p++) {                                          // Find an empty slot
+        if (p == &gt_table[MaxGThreads])                                  // If we have reached the end, gt_table is full
+            return -1;
+        else if (p->state == Unused)
+            break;                                                     // New slot was found
+    }
 
-	*(uint64_t * ) & stack[StackSize - 8] = (uint64_t) gt_stop;             //  put into the stack returning function gt_stop in case function calls return
-	*(uint64_t * ) & stack[StackSize - 16] = (uint64_t) f;                  //  put provided function as a main "run" function
-	p -> ctx.rsp = (uint64_t) & stack[StackSize - 16];                      //  set stack pointer
-	p -> state = Ready;                                                     //  set state
+    stack = malloc(StackSize);                                           // Allocate memory for stack
+    if (!stack)
+        return -1;
+
+    *(uint64_t *)&stack[StackSize - 8] = (uint64_t)gt_stop;              // Put returning function gt_stop
+    *(uint64_t *)&stack[StackSize - 16] = (uint64_t)f;                   // Put provided function as main "run" function
+    p->ctx.rsp = (uint64_t)&stack[StackSize - 16];                       // Set stack pointer
+    p->state = Ready;                                                    // Set state
     
     // Initialize statistics for new thread
     gt_init_stats(&p->stats);
-    gettimeofday(&p->stats.last_ready, NULL);                               // record when thread became ready
+    gettimeofday(&p->stats.last_ready, NULL);                            // Record when thread became ready
+    
+    // Initialize priority fields
+    p->base_priority = priority;
+    p->current_priority = priority;
+    //p->skip_count = 0;
+    gettimeofday(&p->last_scheduled, NULL);
 
-	return 0;
+    return 0;
 }
+
 
 // resets SIGALRM signal
 void gt_reset_sig(int sig) {
-	if (sig == SIGALRM) {
+	if(sig == SIGALRM) {
 		alarm(0);                                                       // Clear pending alarms if any
 	}
 
@@ -428,7 +517,7 @@ void gt_reset_sig(int sig) {
 	sigaddset( & set, sig);                                                 // Set signal (we use SIGALRM)
 	sigprocmask(SIG_UNBLOCK, & set, NULL);                                  // Fetch and change the signal mask
 
-	if (sig == SIGALRM) {
+	if(sig == SIGALRM) {
 		ualarm(500, 500);                                               // Schedule signal after given number of microseconds
 	}
 }
@@ -440,8 +529,8 @@ int gt_uninterruptible_nanosleep(time_t sec, long nanosec) {
 	req.tv_nsec = nanosec;
 
 	do {
-		if (0 != nanosleep( & req, & req)) {
-			if (errno != EINTR)
+		if(0 != nanosleep( & req, & req)) {
+			if(errno != EINTR)
 				return -1;
 		} else {
 			break;

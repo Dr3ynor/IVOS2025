@@ -1,7 +1,7 @@
 CFLAGS = -g -Wall
 
 gthr_demo: gthr.o gthr_switch.o main.o
-	$(CC) -o $@ $^
+	$(CC) -o $@ $^ -lm
 
 .S.o:
 	as -o $@ $^

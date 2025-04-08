@@ -42,9 +42,9 @@ void g(void) {
 
 int main(void) {
 	gt_init();            // initialize threads, see gthr.c
-	gt_create(f);         // set f() as first thread
-	gt_create(f);         // set f() as second thread
-	gt_create(g);         // set g() as third thread
-	gt_create(g);         // set g() as fourth thread
+	gt_create(f, 1);         // set f() as first thread
+	gt_create(f, MaxPriority);         // set f() as second thread
+	gt_create(g, 2);         // set g() as third thread
+	gt_create(g, 2);         // set g() as fourth thread
 	gt_return(1);         // wait until all threads terminate
 }
