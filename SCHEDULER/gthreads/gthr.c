@@ -209,7 +209,7 @@ void gt_print_stats()
 
     printf("\n----- Thread Statistics -----\n");
     printf("%-6s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-8s\n",
-           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Var Run", "Var Wait", "Curr/Base Priority");
+           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Std. Run", "Std. Wait", "Curr/Base Priority");
 
     for (int i = 0; i < MaxGThreads; i++)
     {
@@ -255,7 +255,7 @@ void gt_print_stats()
             gt_table[i].stats.wait_count);
         var_runtime = sqrt(var_runtime);
         var_waittime = sqrt(var_waittime);
-
+        var_waittime = sqrt(var_waittime);
         // Get state as string and color
         const char *state;
         const char *state_color;
@@ -439,7 +439,6 @@ bool gt_schedule(void)
     struct gt_context *old, *new;
     struct timeval now;
     int highest_priority = 0;
-    long longest_wait = 0;
 
     gettimeofday(&now, NULL);
 
@@ -493,7 +492,7 @@ bool gt_schedule(void)
                     p->current_priority = MaxPriority;
                 }
 
-                // Select thread based on a combination of priority and wait time
+                // Select thread based on priority
                 if (p->current_priority >= highest_priority)
                 {
                     highest_priority = p->current_priority;
@@ -508,6 +507,12 @@ bool gt_schedule(void)
             return false;
         }
     }
+
+    else if (current_algorithm == "LotteryScheduling")
+    {
+        
+    }
+
 
     // Update waittime for the thread that's about to run
     if (selected->state == Ready)
