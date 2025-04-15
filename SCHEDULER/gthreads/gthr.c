@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
 
 #include <time.h>
 #include <sys/time.h>
@@ -23,11 +24,12 @@
 #define ANSI_COLOR_CYAN "\x1b[36m"
 #define ANSI_COLOR_RESET "\x1b[0m"
 
+int total_tickets = 0; // Total number of tickets for lottery scheduling
+
 // PriorityBased
 // RoundRobin
-
-char* algorithms[] = { "RoundRobin", "PriorityBased" };
-
+// LotteryScheduling
+char *algorithms[] = {"RoundRobin", "PriorityBased", "LotteryScheduling"};
 
 char* current_algorithm = "RoundRobin"; // Default scheduling algorithm
 
@@ -58,12 +60,85 @@ void select_algorithm()
 }
 
 
-// Get time difference in microseconds
-/*long time_diff_us(struct timeval *start, struct timeval *end)
+
+void gt_sem_init(struct semaphore_t* sem, int initial_value)
 {
-    return ((end->tv_sec - start->tv_sec) * 1000000) +
-           (end->tv_usec - start->tv_usec);
+    sem->value = initial_value; // Initialize semaphore value
+    sem->waiting_count = 0;     // Initialize waiting count
+    for (int i = 0; i < MaxGThreads; i++)
+    {
+        sem->waiting_threads[i] = NULL; // Initialize waiting threads array
+    }
+}
+
+/*
+void gt_sem_wait(struct semaphore_t* sem)
+{
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
+    // Check if semaphore value is greater than 0
+    if (sem->value > 0)
+    {
+        sem->value--; // Decrement semaphore value
+        return;      // Exit if semaphore is available
+    }
+
+    // If semaphore is not available, block the thread
+    gt_current->state = Blocked; // Set current thread state to Blocked
+    sem->waiting_threads[sem->waiting_count++] = gt_current; // Add current thread to waiting list
+
+    // Update waittime for the blocked thread
+    long waittime = time_diff_us(&gt_current->stats.last_ready, &now);
+    gt_current->stats.total_waittime += waittime;
+    gt_current->stats.wait_count++;
+
+    gt_schedule(); // Switch to another thread    TODO: ?
 }*/
+
+void gt_sem_post(struct semaphore_t* sem)
+{
+    // Check if there are waiting threads
+    if (sem->waiting_count > 0)
+    {
+        // Wake up the first waiting thread
+        struct gt *thread_to_wake = sem->waiting_threads[0];
+        for (int i = 0; i < sem->waiting_count - 1; i++)
+        {
+            sem->waiting_threads[i] = sem->waiting_threads[i + 1]; // Shift waiting threads
+        }
+        sem->waiting_count--; // Decrement waiting count
+
+        thread_to_wake->state = Ready; // Set the woken thread to Ready
+        gettimeofday(&thread_to_wake->stats.last_ready, NULL); // Update last ready time
+    }
+    else
+    {
+        sem->value++; // Increment semaphore value if no threads are waiting
+    }
+}
+
+
+void assign_tickets(struct gt *thread) {
+    thread->tickets = thread->base_priority; // Assign tickets based on priority
+    if (thread->tickets <= 0) {
+        thread->tickets = 1; // Ensure at least one ticket
+    }
+    
+    // Range of tickets for this thread
+    thread->ticket_start = total_tickets + 1;
+    thread->ticket_end = total_tickets + thread->tickets;
+    
+    total_tickets += thread->tickets;
+}
+
+int select_winning_ticket() {
+    if (total_tickets <= 0) return -1;
+    
+    return (rand() % total_tickets) + 1;
+}
+
+
 
 long time_diff_us(struct timeval *start, struct timeval *end)
 {
@@ -72,9 +147,6 @@ long time_diff_us(struct timeval *start, struct timeval *end)
     // Ensure time difference is never negative
     return diff > 0 ? diff : 0;
 }
-
-
-
 
 // Initialize thread statistics
 void gt_init_stats(struct gt_stats *stats)
@@ -317,6 +389,9 @@ void gt_print_stats()
                avg_waittime_color, avg_waittime, ANSI_COLOR_RESET,
                var_runtime, var_waittime,
                priority_color, gt_table[i].current_priority, gt_table[i].base_priority, ANSI_COLOR_RESET);
+
+        // printf("Tickets: %d (Range: %d-%d)\n\n\n", gt_table[i].tickets, gt_table[i].ticket_start, gt_table[i].ticket_end);
+                
     }
 
     printf("--- Additional Thread Info ---\n");
@@ -386,16 +461,18 @@ void gt_print_stats()
             printf("  Base priority: %d, Current priority: %d\n",
                    gt_table[i].base_priority, gt_table[i].current_priority);
             printf("  RSP: %lx\n", gt_table[i].ctx.rsp);
+            printf("Tickets: %d (Range: %d-%d)\n\n\n", gt_table[i].tickets, gt_table[i].ticket_start, gt_table[i].ticket_end);
+
         }
     }
     printf("-----------------------------\n");
+    printf("Total Tickets: %d\n", total_tickets);
     exit(0); // Exit after printing stats
 }
 
 // initialize first thread as current context
 void gt_init(void)
 {
-
     gt_current = &gt_table[0];                       // Initialize current thread with thread #0
     gt_current->state = Running;                     // Set current to running
     gt_init_stats(&gt_current->stats);               // Initialize statistics for the first thread
@@ -405,6 +482,14 @@ void gt_init(void)
     gt_current->base_priority = MaxPriority;
     gt_current->current_priority = MaxPriority;
     gettimeofday(&gt_current->last_scheduled, NULL);
+
+    srand(time(NULL));  // initialize random seed
+    // Assign tickets for the current thread
+    gt_current->tickets = 100; // Default number of tickets for the initial thread
+    gt_current->ticket_start = 1;
+    gt_current->ticket_end = gt_current->tickets;
+    total_tickets = gt_current->tickets;
+
 
     signal(SIGALRM, gt_alarm_handle); // Register SIGALRM signal
     signal(SIGINT, gt_print_stats);   // Register SIGINT for statistics display
@@ -464,7 +549,7 @@ bool gt_schedule(void)
         gt_current->stats.sum_squared_runtime += (runtime * runtime);
     }
 
-    if (current_algorithm == "RoundRobin")
+    if (strcmp(current_algorithm, "RoundRobin") == 0)
     {
         p = gt_current;
         while (p->state != Ready)
@@ -476,8 +561,8 @@ bool gt_schedule(void)
         }
         selected = p;
     }
-
-    else if (current_algorithm == "PriorityBased")
+    
+    else if (strcmp(current_algorithm, "PriorityBased") == 0)
     {
         for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
         {
@@ -507,13 +592,22 @@ bool gt_schedule(void)
             return false;
         }
     }
-
-    else if (current_algorithm == "LotteryScheduling")
+    
+    else if (strcmp(current_algorithm, "LotteryScheduling") == 0)
     {
-        
+    if (total_tickets > 0) {
+        int winning_ticket = select_winning_ticket();
+        // Find the thread with the winning ticket
+        selected = NULL; // Explicitly initialize to NULL
+        for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++) {
+            if ((p->state == Ready || p->state == Running) && winning_ticket >= p->ticket_start && winning_ticket <= p->ticket_end) {
+                selected = p;
+                // printf("Selected thread: %ld with winning ticket: %d\n", p - gt_table, winning_ticket);
+                break;
+            }
+        }
     }
-
-
+    }
     // Update waittime for the thread that's about to run
     if (selected->state == Ready)
     {
@@ -595,6 +689,9 @@ int gt_create(void (*f)(void), int priority)
     // Initialize priority fields
     p->base_priority = priority;
     p->current_priority = priority;
+
+    assign_tickets(p); // Assign tickets for the new thread based on priority
+
     gettimeofday(&p->last_scheduled, NULL);
 
     return 0;

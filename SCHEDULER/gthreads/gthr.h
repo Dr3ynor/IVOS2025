@@ -43,6 +43,7 @@ struct gt {
 		Unused,
 		Running,
 		Ready,
+		Blocked,
 	}
 	state;
     
@@ -53,6 +54,17 @@ struct gt {
 	int base_priority;           // Original assigned priority
 	int current_priority;        // Current priority (may be boosted to prevent starvation)
 	struct timeval last_scheduled; // Last time this thread was scheduled
+	int tickets;			 // Number of tickets for lottery scheduling (if used)
+	int ticket_start; // Start of the ticket range for this thread
+	int ticket_end;   // End of the ticket range for this thread	
+
+};
+
+
+struct semaphore_t {
+	int value; // Semaphore value
+	struct gt *waiting_threads[MaxGThreads]; // Array of waiting threads
+	int waiting_count; // Number of threads waiting on this semaphore
 };
 
 
@@ -67,3 +79,7 @@ void gt_alarm_handle(int sig);                                          // perio
 int gt_uninterruptible_nanosleep(time_t sec, long nanosec);             // uninterruptible sleep
 void gt_print_stats();                                                  // print thread statistics on SIGINT
 void select_algorithm();                                                  // select scheduling algorithm
+
+void gt_sem_init(struct semaphore_t* sem, int initial_value);
+void gt_sem_wait(struct semaphore_t* sem); // "P" operace
+void gt_sem_post(struct semaphore_t* sem); // "V" operace
