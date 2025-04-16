@@ -78,6 +78,14 @@ void gt_reset_sig(int sig);                                             // reset
 void gt_alarm_handle(int sig);                                          // periodically triggered by alarm
 int gt_uninterruptible_nanosleep(time_t sec, long nanosec);             // uninterruptible sleep
 void gt_print_stats();                                                  // print thread statistics on SIGINT
+long time_diff_us(struct timeval *start, struct timeval *end);         // calculate time difference in microseconds
+void gt_init_stats(struct gt_stats *stats);                            // initialize thread statistics
+double calculate_variance(long sum, long sum_squared, long count);    // calculate variance
+void assign_tickets(struct gt *thread);                                // assign tickets for lottery scheduling
+int select_winning_ticket();                                            // select winning ticket for lottery scheduling
+const char* get_color_for_value(long value, long min, long max);       // get color for value based on min/max
+void get_global_min_max(long *min_runtime, long *max_runtime, long *min_waittime, long *max_waittime); // get global min/max values
+void gt_print_stats();                                                  // print thread statistics
 void select_algorithm();                                                  // select scheduling algorithm
 
 void gt_sem_init(struct semaphore_t* sem, int initial_value);

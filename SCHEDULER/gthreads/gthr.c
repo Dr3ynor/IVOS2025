@@ -24,6 +24,8 @@
 #define ANSI_COLOR_CYAN "\x1b[36m"
 #define ANSI_COLOR_RESET "\x1b[0m"
 
+sigset_t old_mask, new_mask;
+
 int total_tickets = 0; // Total number of tickets for lottery scheduling
 
 // PriorityBased
@@ -31,7 +33,7 @@ int total_tickets = 0; // Total number of tickets for lottery scheduling
 // LotteryScheduling
 char *algorithms[] = {"RoundRobin", "PriorityBased", "LotteryScheduling"};
 
-char* current_algorithm = "RoundRobin"; // Default scheduling algorithm
+char *current_algorithm = "RoundRobin"; // Default scheduling algorithm
 
 void select_algorithm()
 {
@@ -59,9 +61,7 @@ void select_algorithm()
     printf("Selected scheduling algorithm: %s\n", current_algorithm);
 }
 
-
-
-void gt_sem_init(struct semaphore_t* sem, int initial_value)
+void gt_sem_init(struct semaphore_t *sem, int initial_value)
 {
     sem->value = initial_value; // Initialize semaphore value
     sem->waiting_count = 0;     // Initialize waiting count
@@ -71,9 +71,12 @@ void gt_sem_init(struct semaphore_t* sem, int initial_value)
     }
 }
 
-/*
-void gt_sem_wait(struct semaphore_t* sem)
+void gt_sem_wait(struct semaphore_t *sem)
 {
+    sigemptyset(&new_mask);
+    sigaddset(&new_mask, SIGINT);
+    sigaddset(&new_mask, SIGALRM);
+    sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
     struct timeval now;
     gettimeofday(&now, NULL);
 
@@ -81,23 +84,30 @@ void gt_sem_wait(struct semaphore_t* sem)
     if (sem->value > 0)
     {
         sem->value--; // Decrement semaphore value
-        return;      // Exit if semaphore is available
+        return;       // Exit if semaphore is available
     }
 
     // If semaphore is not available, block the thread
-    gt_current->state = Blocked; // Set current thread state to Blocked
-    sem->waiting_threads[sem->waiting_count++] = gt_current; // Add current thread to waiting list
+    gt_current->state = Blocked;
+    sem->waiting_threads[sem->waiting_count++] = gt_current;
 
-    // Update waittime for the blocked thread
+    // update waittime for the blocked thread
     long waittime = time_diff_us(&gt_current->stats.last_ready, &now);
     gt_current->stats.total_waittime += waittime;
     gt_current->stats.wait_count++;
 
-    gt_schedule(); // Switch to another thread    TODO: ?
-}*/
+    sigprocmask(SIG_SETMASK, &old_mask, NULL);
 
-void gt_sem_post(struct semaphore_t* sem)
+    gt_schedule(); // switch to another thread
+}
+
+void gt_sem_post(struct semaphore_t *sem)
 {
+    sigset_t old_mask, new_mask;
+    sigemptyset(&new_mask);
+    sigaddset(&new_mask, SIGINT);
+    sigaddset(&new_mask, SIGALRM);
+    sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
     // Check if there are waiting threads
     if (sem->waiting_count > 0)
     {
@@ -109,36 +119,38 @@ void gt_sem_post(struct semaphore_t* sem)
         }
         sem->waiting_count--; // Decrement waiting count
 
-        thread_to_wake->state = Ready; // Set the woken thread to Ready
+        thread_to_wake->state = Ready;                         // Set the woken thread to Ready
         gettimeofday(&thread_to_wake->stats.last_ready, NULL); // Update last ready time
     }
     else
     {
         sem->value++; // Increment semaphore value if no threads are waiting
     }
+    sigprocmask(SIG_SETMASK, &old_mask, NULL);
 }
 
-
-void assign_tickets(struct gt *thread) {
+void assign_tickets(struct gt *thread)
+{
     thread->tickets = thread->base_priority; // Assign tickets based on priority
-    if (thread->tickets <= 0) {
+    if (thread->tickets <= 0)
+    {
         thread->tickets = 1; // Ensure at least one ticket
     }
-    
+
     // Range of tickets for this thread
     thread->ticket_start = total_tickets + 1;
     thread->ticket_end = total_tickets + thread->tickets;
-    
+
     total_tickets += thread->tickets;
 }
 
-int select_winning_ticket() {
-    if (total_tickets <= 0) return -1;
-    
+int select_winning_ticket()
+{
+    if (total_tickets <= 0)
+        return -1;
+
     return (rand() % total_tickets) + 1;
 }
-
-
 
 long time_diff_us(struct timeval *start, struct timeval *end)
 {
@@ -281,8 +293,9 @@ void gt_print_stats()
 
     printf("\n----- Thread Statistics -----\n");
     printf("%-6s %-12s %-12s %-12s %-12s %-12s %-12s %-12s %-8s\n",
-           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Std. Run", "Std. Wait", "Curr/Base Priority");
+           "ID", "State", "Runtime(μs)", "Waittime(μs)", "Avg Run(μs)", "Avg Wait(μs)", "Std. Run", "Std. Wait", "Curr/Base Priority (RR)");
 
+    
     for (int i = 0; i < MaxGThreads; i++)
     {
         if (gt_table[i].state == Unused && gt_table[i].stats.run_count == 0)
@@ -328,6 +341,7 @@ void gt_print_stats()
         var_runtime = sqrt(var_runtime);
         var_waittime = sqrt(var_waittime);
         var_waittime = sqrt(var_waittime);
+
         // Get state as string and color
         const char *state;
         const char *state_color;
@@ -345,6 +359,10 @@ void gt_print_stats()
             state = "Unused";
             state_color = ANSI_COLOR_MAGENTA;
             break;
+        case Blocked:
+            state = "Blocked";
+            state_color = ANSI_COLOR_RED;
+            break;
         default:
             state = "Unknown";
             state_color = ANSI_COLOR_YELLOW;
@@ -353,13 +371,16 @@ void gt_print_stats()
         // Get colors for runtime and waittime
         const char *runtime_color = get_color_for_value(total_runtime, global_min_runtime, global_max_runtime);
         const char *waittime_color = get_color_for_value(total_waittime, global_min_waittime, global_max_waittime);
-        const char *avg_runtime_color = get_color_for_value(avg_runtime,
-                                                            global_min_runtime / gt_table[i].stats.run_count > 0 ? gt_table[i].stats.run_count : 1,
-                                                            global_max_runtime / gt_table[i].stats.run_count > 0 ? gt_table[i].stats.run_count : 1);
-        const char *avg_waittime_color = get_color_for_value(avg_waittime,
-                                                             global_min_waittime / gt_table[i].stats.wait_count > 0 ? gt_table[i].stats.wait_count : 1,
-                                                             global_max_waittime / gt_table[i].stats.wait_count > 0 ? gt_table[i].stats.wait_count : 1);
-
+        const char *avg_runtime_color = get_color_for_value(
+            avg_runtime,
+            gt_table[i].stats.run_count > 0 ? (double)global_min_runtime / gt_table[i].stats.run_count : (double)global_min_runtime,
+            gt_table[i].stats.run_count > 0 ? (double)global_max_runtime / gt_table[i].stats.run_count : (double)global_max_runtime
+        );
+        const char *avg_waittime_color = get_color_for_value(
+            avg_waittime,
+            gt_table[i].stats.wait_count > 0 ? (double)global_min_waittime / gt_table[i].stats.wait_count : (double)global_min_waittime,
+            gt_table[i].stats.wait_count > 0 ? (double)global_max_waittime / gt_table[i].stats.wait_count : (double)global_max_waittime
+        );
         // Priority color (red for low, yellow for medium, green for high)
         const char *priority_color;
         if (gt_table[i].current_priority > gt_table[i].base_priority)
@@ -389,9 +410,7 @@ void gt_print_stats()
                avg_waittime_color, avg_waittime, ANSI_COLOR_RESET,
                var_runtime, var_waittime,
                priority_color, gt_table[i].current_priority, gt_table[i].base_priority, ANSI_COLOR_RESET);
-
         // printf("Tickets: %d (Range: %d-%d)\n\n\n", gt_table[i].tickets, gt_table[i].ticket_start, gt_table[i].ticket_end);
-                
     }
 
     printf("--- Additional Thread Info ---\n");
@@ -421,6 +440,7 @@ void gt_print_stats()
                    state_color,
                    gt_table[i].state == Running ? "Running" : gt_table[i].state == Ready ? "Ready"
                                                           : gt_table[i].state == Unused  ? "Unused"
+                                                          : gt_table[i].state == Blocked ? "Blocked"
                                                                                          : "Unknown",
                    ANSI_COLOR_RESET);
 
@@ -462,7 +482,6 @@ void gt_print_stats()
                    gt_table[i].base_priority, gt_table[i].current_priority);
             printf("  RSP: %lx\n", gt_table[i].ctx.rsp);
             printf("Tickets: %d (Range: %d-%d)\n\n\n", gt_table[i].tickets, gt_table[i].ticket_start, gt_table[i].ticket_end);
-
         }
     }
     printf("-----------------------------\n");
@@ -483,13 +502,12 @@ void gt_init(void)
     gt_current->current_priority = MaxPriority;
     gettimeofday(&gt_current->last_scheduled, NULL);
 
-    srand(time(NULL));  // initialize random seed
+    srand(time(NULL)); // initialize random seed
     // Assign tickets for the current thread
-    gt_current->tickets = 100; // Default number of tickets for the initial thread
+    gt_current->tickets = MaxPriority; // Default number of tickets for the initial thread
     gt_current->ticket_start = 1;
     gt_current->ticket_end = gt_current->tickets;
     total_tickets = gt_current->tickets;
-
 
     signal(SIGALRM, gt_alarm_handle); // Register SIGALRM signal
     signal(SIGINT, gt_print_stats);   // Register SIGINT for statistics display
@@ -561,7 +579,7 @@ bool gt_schedule(void)
         }
         selected = p;
     }
-    
+
     else if (strcmp(current_algorithm, "PriorityBased") == 0)
     {
         for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
@@ -592,21 +610,24 @@ bool gt_schedule(void)
             return false;
         }
     }
-    
+
     else if (strcmp(current_algorithm, "LotteryScheduling") == 0)
     {
-    if (total_tickets > 0) {
-        int winning_ticket = select_winning_ticket();
-        // Find the thread with the winning ticket
-        selected = NULL; // Explicitly initialize to NULL
-        for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++) {
-            if ((p->state == Ready || p->state == Running) && winning_ticket >= p->ticket_start && winning_ticket <= p->ticket_end) {
-                selected = p;
-                // printf("Selected thread: %ld with winning ticket: %d\n", p - gt_table, winning_ticket);
-                break;
+        if (total_tickets > 0)
+        {
+            int winning_ticket = select_winning_ticket();
+            // Find the thread with the winning ticket
+            selected = NULL; // Explicitly initialize to NULL
+            for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
+            {
+                if ((p->state == Ready || p->state == Running) && winning_ticket >= p->ticket_start && winning_ticket <= p->ticket_end)
+                {
+                    selected = p;
+                    // printf("Selected thread: %ld with winning ticket: %d\n", p - gt_table, winning_ticket);
+                    break;
+                }
             }
         }
-    }
     }
     // Update waittime for the thread that's about to run
     if (selected->state == Ready)
