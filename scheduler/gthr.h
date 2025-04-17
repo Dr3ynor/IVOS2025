@@ -88,6 +88,14 @@ void get_global_min_max(long *min_runtime, long *max_runtime, long *min_waittime
 void gt_print_stats();                                                  // print thread statistics
 void select_algorithm();                                                  // select scheduling algorithm
 
+void update_runtime_stats(struct gt *thread, struct timeval *now);
+void update_waittime_stats(struct gt *thread, struct timeval *now);
+void prepare_for_switch(struct gt *current, struct gt *next, struct timeval *now);
+bool round_robin_select(struct gt **selected);
+bool priority_based_select(struct gt **selected);
+bool lottery_scheduling_select(struct gt **selected);
+
+
 void gt_sem_init(struct semaphore_t* sem, int initial_value);
 void gt_sem_wait(struct semaphore_t* sem); // "P" operace
 void gt_sem_post(struct semaphore_t* sem); // "V" operace

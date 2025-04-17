@@ -546,138 +546,169 @@ void __attribute__((noreturn)) gt_return(int ret)
     exit(ret);
 }
 
-// switch from one thread to other
 bool gt_schedule(void)
 {
-    struct gt *p;
-    struct gt *selected = NULL;
     struct gt_context *old, *new;
     struct timeval now;
-    int highest_priority = 0;
-
+    struct gt *selected = NULL;
     gettimeofday(&now, NULL);
 
-    gt_reset_sig(SIGALRM); // Reset signal
+    // Reset the alarm signal for the scheduler
+    gt_reset_sig(SIGALRM);
 
-    // Update statistics for current thread if it's running
-    if (gt_current->state == Running)
-    {
-        long runtime = time_diff_us(&gt_current->stats.last_run, &now);
-        gt_current->stats.total_runtime += runtime;
-        gt_current->stats.run_count++;
+    // Update statistics for current running thread
+    update_runtime_stats(gt_current, &now);
+
+    // Select next thread based on scheduling algorithm
+    if (strcmp(current_algorithm, "RoundRobin") == 0) {
+        bool found = round_robin_select(&selected);
+        if (!found) return false;
+    } 
+    else if (strcmp(current_algorithm, "PriorityBased") == 0) {
+        bool found = priority_based_select(&selected);
+        if (!found) return false;
+    } 
+    else if (strcmp(current_algorithm, "LotteryScheduling") == 0) {
+        bool found = lottery_scheduling_select(&selected);
+        if (!found) return false;
+    }
+    
+    // Update statistics for the newly selected thread
+    update_waittime_stats(selected, &now);
+
+    // Prepare for context switch
+    prepare_for_switch(gt_current, selected, &now);
+
+    // Perform the context switch
+    old = &gt_current->ctx;         // Prepare pointers to context of current
+    new = &selected->ctx;          // and new thread
+    gt_current = selected;         // Switch current indicator to new thread
+    gt_switch(old, new);           // Perform context switch
+    
+    return true;
+}
+
+// Updates runtime statistics for the given thread
+void update_runtime_stats(struct gt *thread, struct timeval *now)
+{
+    if (thread->state == Running) {
+        long runtime = time_diff_us(&thread->stats.last_run, now);
+        thread->stats.total_runtime += runtime;
+        thread->stats.run_count++;
 
         // Update min/max/sum/sum_squared for runtime
-        if (runtime < gt_current->stats.min_runtime)
-        {
-            gt_current->stats.min_runtime = runtime;
+        if (runtime < thread->stats.min_runtime) {
+            thread->stats.min_runtime = runtime;
         }
-        if (runtime > gt_current->stats.max_runtime)
-        {
-            gt_current->stats.max_runtime = runtime;
+        if (runtime > thread->stats.max_runtime) {
+            thread->stats.max_runtime = runtime;
         }
-        gt_current->stats.sum_runtime += runtime;
-        gt_current->stats.sum_squared_runtime += (runtime * runtime);
+        thread->stats.sum_runtime += runtime;
+        thread->stats.sum_squared_runtime += (runtime * runtime);
     }
+}
 
-    if (strcmp(current_algorithm, "RoundRobin") == 0)
-    {
-        p = gt_current;
-        while (p->state != Ready)
-        {
-            if (++p == &gt_table[MaxGThreads])
-                p = &gt_table[0];
-            if (p == gt_current)
-                return false; // No ready threads found
-        }
-        selected = p;
-    }
-
-    else if (strcmp(current_algorithm, "PriorityBased") == 0)
-    {
-        for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
-        {
-            if (p->state == Ready)
-            {
-                // Apply starvation prevention: boost priority if skipped too many times
-                p->current_priority++;
-
-                // Cap the boosted priority
-                if (p->current_priority > MaxPriority)
-                {
-                    p->current_priority = MaxPriority;
-                }
-
-                // Select thread based on priority
-                if (p->current_priority >= highest_priority)
-                {
-                    highest_priority = p->current_priority;
-                    selected = p;
-                }
-            }
-        }
-
-        // If no thread was selected, return false
-        if (!selected)
-        {
-            return false;
-        }
-    }
-
-    else if (strcmp(current_algorithm, "LotteryScheduling") == 0)
-    {
-        if (total_tickets > 0)
-        {
-            int winning_ticket = select_winning_ticket();
-            // Find the thread with the winning ticket
-            selected = NULL; // Explicitly initialize to NULL
-            for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
-            {
-                if ((p->state == Ready || p->state == Running) && winning_ticket >= p->ticket_start && winning_ticket <= p->ticket_end)
-                {
-                    selected = p;
-                    // printf("Selected thread: %ld with winning ticket: %d\n", p - gt_table, winning_ticket);
-                    break;
-                }
-            }
-        }
-    }
-    // Update waittime for the thread that's about to run
-    if (selected->state == Ready)
-    {
-        long waittime = time_diff_us(&selected->stats.last_ready, &now);
-        selected->stats.total_waittime += waittime;
-        selected->stats.wait_count++;
+// Updates waittime statistics for the thread that's about to run
+void update_waittime_stats(struct gt *thread, struct timeval *now)
+{
+    if (thread->state == Ready) {
+        long waittime = time_diff_us(&thread->stats.last_ready, now);
+        thread->stats.total_waittime += waittime;
+        thread->stats.wait_count++;
 
         // Update min/max/sum/sum_squared for waittime
-        if (waittime < selected->stats.min_waittime)
-        {
-            selected->stats.min_waittime = waittime;
+        if (waittime < thread->stats.min_waittime) {
+            thread->stats.min_waittime = waittime;
         }
-        if (waittime > selected->stats.max_waittime)
-        {
-            selected->stats.max_waittime = waittime;
+        if (waittime > thread->stats.max_waittime) {
+            thread->stats.max_waittime = waittime;
         }
-        selected->stats.sum_waittime += waittime;
-        selected->stats.sum_squared_waittime += (waittime * waittime);
+        thread->stats.sum_waittime += waittime;
+        thread->stats.sum_squared_waittime += (waittime * waittime);
 
-        selected->current_priority = selected->base_priority; // Reset current priority to base
+        thread->current_priority = thread->base_priority; // Reset current priority to base
+    }
+}
+
+// Prepare both threads for context switch
+void prepare_for_switch(struct gt *current, struct gt *next, struct timeval *now)
+{
+    if (current->state != Unused) {
+        current->state = Ready;
+        gettimeofday(&current->stats.last_ready, NULL); // Record when thread became ready
     }
 
-    if (gt_current->state != Unused)
-    {
-        gt_current->state = Ready;
-        gettimeofday(&gt_current->stats.last_ready, NULL); // Record when thread became ready
+    next->state = Running;
+    gettimeofday(&next->stats.last_run, NULL);      // Record when thread starts running
+    gettimeofday(&next->last_scheduled, NULL);      // Update last scheduled time
+}
+
+// Round Robin scheduling algorithm implementation
+bool round_robin_select(struct gt **selected)
+{
+    struct gt *p = gt_current;
+    
+    while (p->state != Ready) {
+        if (++p == &gt_table[MaxGThreads])
+            p = &gt_table[0];
+        
+        if (p == gt_current)
+            return false; // No ready threads found
     }
-
-    selected->state = Running;
-    gettimeofday(&selected->stats.last_run, NULL); // Record when thread starts running
-    gettimeofday(&selected->last_scheduled, NULL); // Update last scheduled time
-
-    old = &gt_current->ctx; // Prepare pointers to context of current
-    new = &selected->ctx;   // and new thread
-    gt_current = selected;  // Switch current indicator to new thread
-    gt_switch(old, new);    // Perform context switch
+    
+    *selected = p;
     return true;
+}
+
+// Priority-based scheduling algorithm implementation
+bool priority_based_select(struct gt **selected)
+{
+    struct gt *p;
+    int highest_priority = 0;
+    bool found = false;
+    
+    for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++) {
+        if (p->state == Ready) {
+            // Apply starvation prevention: boost priority if skipped too many times
+            p->current_priority++;
+
+            // Cap the boosted priority
+            if (p->current_priority > MaxPriority) {
+                p->current_priority = MaxPriority;
+            }
+
+            // Select thread based on priority
+            if (p->current_priority >= highest_priority) {
+                highest_priority = p->current_priority;
+                *selected = p;
+                found = true;
+            }
+        }
+    }
+    
+    return found;
+}
+
+// Lottery scheduling algorithm implementation
+bool lottery_scheduling_select(struct gt **selected)
+{
+    if (total_tickets <= 0) {
+        return false;
+    }
+    
+    int winning_ticket = select_winning_ticket();
+    struct gt *p;
+    
+    for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++) {
+        if ((p->state == Ready || p->state == Running) && 
+            winning_ticket >= p->ticket_start && 
+            winning_ticket <= p->ticket_end) {
+            *selected = p;
+            return true;
+        }
+    }
+    
+    return false; // No thread found with the winning ticket
 }
 
 // return function for terminating thread
