@@ -1,5 +1,0 @@
-curl -X POST -k https://localhost:8080/upload -H "Content-Type: multipart/form-data; boundary=---123456789"      --data-binary $'-----123456789\r\nContent-Disposition: form-data; name="uploaded_file1"; filename="post.txt"\r\nContent-Type: text/plain\r\n\r\n'"$(cat post.txt)"$'\r\n-----123456789\r\nContent-Disposition: form-data; name="uploaded_file2"; filename="post2.txt"\r\nContent-Type: text/plain\r\n\r\n'"$(cat post2.txt)"$'\r\n-----123456789\r\n'
-
-
-
-curl -X POST -k https://localhost:8080/upload -H "Content-Type: multipart/form-data; boundary=---123456789"      --data-binary $'-----123456789\r\nContent-Disposition: form-data; name="uploaded_file1"; filename="file.bin"\r\nContent-Type: text/plain\r\n\r\n'"$(cat file.bin)"$'\r\n-----123456789\r\n'

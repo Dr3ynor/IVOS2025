@@ -1,6 +1,0 @@
-{
-    "files.associations": {
-        "gthr_struct.h": "c",
-        "stdbool.h": "c"
-    }
-}
