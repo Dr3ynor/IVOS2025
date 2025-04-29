@@ -117,20 +117,20 @@ int main(void)
 	init_shared_buffer(); // initialize shared buffer
 	print_buffer();		  // print initial buffer state
 
-	
+	/*
 	gt_create(f, 1);		   // set f() as first thread
 	gt_create(f, MaxPriority); // set f() as second thread
 	gt_create(g, 5);		   // set g() as third thread
 	gt_create(g, 10);		   // set g() as fourth thread
 	
-
-	/*
+*/
+	
 	gt_create(f_sem, 10);		   // set f() as first thread
-	//gt_create(f, MaxPriority); // set f() as second thread
+	gt_create(f_sem, MaxPriority); // set f() as second thread
 	gt_create(f_sem, 5);		   // set g() as third thread
-	// gt_create(f, 10);		   // set g() as fourth thread
-	*/
-
+	gt_create(f_sem, 10);		   // set g() as fourth thread
+	
+	// TODO: ROUNDROBIN S SEMAFOREM NEFUNGUJE
 
 	gt_return(1);			   // wait until all threads terminate
 }
