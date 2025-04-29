@@ -62,19 +62,14 @@ void select_algorithm()
 
 void gt_sem_init(struct semaphore_t *sem, int initial_value)
 {
-    sem->value = initial_value; // Initialize semaphore value
-    sem->waiting_count = 0;     // Initialize waiting count
-    for (int i = 0; i < MaxGThreads; i++)
-    {
-        sem->waiting_threads[i] = NULL; // Initialize waiting threads array
-    }
+    sem->value = initial_value;       // Initialize semaphore value
+    sem->head = NULL;                 // Initialize queue head
+    sem->tail = NULL;                 // Initialize queue tail
     printf("Semaphore initialized with value: %d\n", initial_value);
 }
 
 void gt_sem_wait(struct semaphore_t *sem)
 {
-    // printf("waiting thread %ld\n", gt_current - gt_table);
-    
     // Block signals to create a critical section
     sigset_t old_mask, new_mask;
     sigemptyset(&new_mask);
@@ -88,17 +83,41 @@ void gt_sem_wait(struct semaphore_t *sem)
     // Check if semaphore value is greater than 0
     if (sem->value > 0)
     {
-        sem->value--; // Decrement semaphore value
+        sem->value--;                // Decrement semaphore value
+        // printf("Semaphore value decremented to: %d\n", sem->value);
         // Restore the original signal mask before returning
         sigprocmask(SIG_SETMASK, &old_mask, NULL);
-        return;       // Exit if semaphore is available
+        return;                      // Exit if semaphore is available
     }
+    
 
     // If semaphore is not available, block the thread
     gt_current->state = Blocked;
-    sem->waiting_threads[sem->waiting_count++] = gt_current;
+    // printf("Thread %ld is blocked\n", gt_current - gt_table);
 
-    // update waittime for the blocked thread
+    // Create a new node for the waiting queue
+    struct waiting_queue *new_node = (struct waiting_queue *)malloc(sizeof(struct waiting_queue));
+    if (new_node == NULL) {
+        printf("Error: Failed to allocate memory for queue node\n");
+        sigprocmask(SIG_SETMASK, &old_mask, NULL);
+        return;
+    }
+    
+    new_node->thread = gt_current;
+    new_node->next = NULL;
+    
+    // Add to the queue (FIFO)
+    if (sem->head == NULL) {
+        // Empty queue
+        sem->head = new_node;
+        sem->tail = new_node;
+    } else {
+        // Add to the end of the queue
+        sem->tail->next = new_node;
+        sem->tail = new_node;
+    }
+
+    // Update waittime for the blocked thread
     long waittime = time_diff_us(&gt_current->stats.last_ready, &now);
     gt_current->stats.total_waittime += waittime;
     gt_current->stats.wait_count++;
@@ -106,11 +125,13 @@ void gt_sem_wait(struct semaphore_t *sem)
     // Restore the signal mask before scheduling
     sigprocmask(SIG_SETMASK, &old_mask, NULL);
 
-    //gt_schedule(); // switch to another thread
+    gt_schedule(); // switch to another thread
 }
+
 
 void gt_sem_post(struct semaphore_t *sem)
 {
+
     // Block signals to create a critical section
     sigset_t old_mask, new_mask;
     sigemptyset(&new_mask);
@@ -119,22 +140,30 @@ void gt_sem_post(struct semaphore_t *sem)
     sigprocmask(SIG_BLOCK, &new_mask, &old_mask);
     
     // Check if there are waiting threads
-    if (sem->waiting_count > 0)
-    {
-        // Wake up the first waiting thread
-        struct gt *thread_to_wake = sem->waiting_threads[0];
-        for (int i = 0; i < sem->waiting_count - 1; i++)
-        {
-            sem->waiting_threads[i] = sem->waiting_threads[i + 1]; // Shift waiting threads
+    if (sem->head != NULL) {
+        // printf("POST: head is not NULL\n");
+        // Get the first waiting thread from the queue
+        struct waiting_queue *first_node = sem->head;
+        struct gt *thread_to_wake = first_node->thread;
+        
+        // Update the head pointer
+        sem->head = first_node->next;
+        
+        // If queue becomes empty, update tail as well
+        if (sem->head == NULL) {
+            sem->tail = NULL;
         }
-        sem->waiting_count--; // Decrement waiting count
-
-        thread_to_wake->state = Ready;                         // Set the woken thread to Ready
-        gettimeofday(&thread_to_wake->stats.last_ready, NULL); // Update last ready time
-    }
-    else
-    {
-        sem->value++; // Increment semaphore value if no threads are waiting
+        
+        // Free the node
+        free(first_node);
+        
+        thread_to_wake->state = Ready;                          // Set the woken thread to Ready
+        gettimeofday(&thread_to_wake->stats.last_ready, NULL);  // Update last ready time
+        
+        // printf("Thread %ld awakened\n", thread_to_wake - gt_table);
+    } else {
+        sem->value++;  // Increment semaphore value if no threads are waiting
+        // printf("Semaphore value incremented to: %d\n", sem->value);
     }
     
     // Restore the original signal mask
@@ -566,7 +595,11 @@ bool gt_schedule(void)
     } 
     else if (strcmp(current_algorithm, "PriorityBased") == 0) {
         bool found = priority_based_select(&selected);
-        if (!found) return false;
+        if (!found) 
+        {
+            printf("No ready threads found for PriorityBased scheduling.\n");
+            return false;
+        }
     } 
     else if (strcmp(current_algorithm, "LotteryScheduling") == 0) {
         bool found = lottery_scheduling_select(&selected);
@@ -611,7 +644,7 @@ void update_runtime_stats(struct gt *thread, struct timeval *now)
 // Updates waittime statistics for the thread that's about to run
 void update_waittime_stats(struct gt *thread, struct timeval *now)
 {
-    if (thread->state == Ready) {
+    if (thread->state == Ready || thread->state == Blocked) {
         long waittime = time_diff_us(&thread->stats.last_ready, now);
         thread->stats.total_waittime += waittime;
         thread->stats.wait_count++;
@@ -633,7 +666,7 @@ void update_waittime_stats(struct gt *thread, struct timeval *now)
 // Prepare both threads for context switch
 void prepare_for_switch(struct gt *current, struct gt *next, struct timeval *now)
 {
-    if (current->state != Unused) {
+    if (current->state != Unused && current->state != Blocked) {
         current->state = Ready;
         gettimeofday(&current->stats.last_ready, NULL); // Record when thread became ready
     }
@@ -649,6 +682,9 @@ bool round_robin_select(struct gt **selected)
     struct gt *p = gt_current;
     
     while (p->state != Ready) {
+        if(Blocked == p->state) {
+            continue;
+        }
         if (++p == &gt_table[MaxGThreads])
             p = &gt_table[0];
         
@@ -668,6 +704,10 @@ bool priority_based_select(struct gt **selected)
     bool found = false;
     
     for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++) {
+        if (Blocked == p->state)
+        {
+            continue;
+        }
         if (p->state == Ready) {
             // Apply starvation prevention: boost priority if skipped too many times
             p->current_priority++;
@@ -685,7 +725,9 @@ bool priority_based_select(struct gt **selected)
             }
         }
     }
-    
+    *selected =gt_current;
+    found = true;
+    printf("state of found thread: %d\n", (*selected)->state);
     return found;
 }
 
@@ -705,6 +747,10 @@ bool lottery_scheduling_select(struct gt **selected)
             winning_ticket <= p->ticket_end) {
             *selected = p;
             return true;
+        }
+        else if (Blocked == p->state)
+        {
+            continue;
         }
     }
     

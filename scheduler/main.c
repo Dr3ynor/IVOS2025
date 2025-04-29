@@ -11,34 +11,8 @@
 
 #include "gthr.h"
 
-#define SHARED_BUFFER_SIZE 5
 
 struct semaphore_t sem;
-int shared_buffer[SHARED_BUFFER_SIZE];
-int write_index = 0;
-int read_index = 0;
-
-void init_shared_buffer()
-{
-	for (int i = 0; i < SHARED_BUFFER_SIZE; i++)
-	{
-		shared_buffer[i] = -1; // -1 indicates empty slot
-	}
-}
-
-void print_buffer()
-{
-	printf("Buffer: [");
-	for (int i = 0; i < SHARED_BUFFER_SIZE; i++)
-	{
-		printf("%d", shared_buffer[i]);
-		if (i < SHARED_BUFFER_SIZE - 1)
-		{
-			printf(", ");
-		}
-	}
-	printf("]\n");
-}
 
 // Dummy function to simulate some thread work
 void f(void)
@@ -77,16 +51,22 @@ void f_sem(void)
 {
 	static int x;
 	int i = 0, id;
-
 	id = ++x;
 	while (true)
 	{
-		gt_sem_wait(&sem); // wait for semaphore
-		shared_buffer[write_index] = id; // produce item
-		write_index = (write_index + 1) % SHARED_BUFFER_SIZE;
-		// print_buffer();
-		// sleep(1000); // simulate work
-		gt_sem_post(&sem); // signal semaphore
+
+		// printf("Semaphore value before WAIT: %d\n", sem.value);
+		gt_sem_wait(&sem);
+		printf("SEMAPHORE IN CRITICAL SECTION WITH ID %d\n",id);
+
+
+		// printf("Semaphore value: %d\n", sem.value);
+		// printf("F Thread id = %d, val = %d BEGINNING\n", id, ++i);
+		gt_uninterruptible_nanosleep(0, 50000000);
+		// printf("F Thread id = %d, val = %d END\n", id, ++i);
+		gt_uninterruptible_nanosleep(0, 50000000);
+
+		gt_sem_post(&sem); // Signal semaphore
 	}
 }
 
@@ -94,15 +74,18 @@ void g_sem(void)
 {
 	static int x;
 	int i = 0, id;
-
 	id = ++x;
+
 	while (true)
 	{
-		gt_sem_wait(&sem); // wait for semaphore
-		int item = shared_buffer[read_index]; // consume item
-		read_index = (read_index + 1) % SHARED_BUFFER_SIZE;
-		// print_buffer();
-		gt_sem_post(&sem); // signal semaphore
+		gt_sem_wait(&sem);
+
+		printf("G Thread id = %d, val = %d BEGINNING\n", id, ++i);
+		gt_uninterruptible_nanosleep(0, 50000000);
+		printf("G Thread id = %d, val = %d END\n", id, ++i);
+		gt_uninterruptible_nanosleep(0, 50000000);
+
+		gt_sem_post(&sem); // Signal semaphore
 	}
 }
 
@@ -113,22 +96,19 @@ int main(void)
 
 	gt_init(); // initialize threads, see gthr.c
 
-	gt_sem_init(&sem, 1); // initialize semaphore
-	init_shared_buffer(); // initialize shared buffer
-	print_buffer();		  // print initial buffer state
+	gt_sem_init(&sem, 0); // initialize semaphore
 
 	/*
 	gt_create(f, 1);		   // set f() as first thread
 	gt_create(f, MaxPriority); // set f() as second thread
 	gt_create(g, 5);		   // set g() as third thread
 	gt_create(g, 10);		   // set g() as fourth thread
+	*/
 	
-*/
-	
-	gt_create(f_sem, 10);		   // set f() as first thread
-	gt_create(f_sem, MaxPriority); // set f() as second thread
-	gt_create(f_sem, 5);		   // set g() as third thread
-	gt_create(f_sem, 10);		   // set g() as fourth thread
+	gt_create(f_sem, 1);		   // set f() as first thread
+	gt_create(f_sem, 2); // set f() as second thread
+	gt_create(f_sem, 3);		   // set g() as third thread
+	gt_create(f_sem, 4);		   // set g() as fourth thread
 	
 	// TODO: ROUNDROBIN S SEMAFOREM NEFUNGUJE
 

@@ -61,10 +61,16 @@ struct gt {
 };
 
 
+struct waiting_queue {
+    struct gt *thread;               // Pointer to the thread
+    struct waiting_queue *next;      // Pointer to the next element in the queue
+};
+
+// Updated semaphore structure
 struct semaphore_t {
-	int value; // Semaphore value
-	struct gt *waiting_threads[MaxGThreads]; // Array of waiting threads
-	int waiting_count; // Number of threads waiting on this semaphore
+    int value;                        // Current semaphore value
+    struct waiting_queue *head;       // Head of the waiting queue
+    struct waiting_queue *tail;       // Tail of the waiting queue
 };
 
 
