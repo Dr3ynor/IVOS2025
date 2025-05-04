@@ -4,6 +4,16 @@
 #include <string.h>
 #include <ctype.h>
 
+
+FILE* in;
+int i;
+PartitionTable pt[4];
+Fat16BootSector bs;
+Fat16Entry entry;
+
+
+
+
 void read(char *filename) {
   if (filename == NULL) {
       fprintf(stderr, "Error: filename is NULL\n");
@@ -41,16 +51,6 @@ void read(char *filename) {
       perror("Error opening disk image");
       return;
   }
-
-  PartitionTable pt[4];
-  Fat16BootSector bs;
-  Fat16Entry entry;
-
-  fseek(in, 0x1BE, SEEK_SET);
-  fread(pt, sizeof(PartitionTable), 4, in);
-
-  fseek(in, 512 * pt[0].start_sector, SEEK_SET);
-  fread(&bs, sizeof(Fat16BootSector), 1, in);
 
   // calculate locations
   int root_dir_offset = (pt[0].start_sector + bs.reserved_sectors + bs.number_of_fats * bs.fat_size_sectors) * bs.sector_size;
@@ -120,7 +120,7 @@ char* get_attributes(unsigned char attributes)
   } else if (attributes & 0x02) {
     return "<HID>";
   } else if (attributes & 0x04) {
-    return "<SYS>>";
+    return "<SYS>";
   } else if (attributes & 0x08) {
     return "<VOL>";
   } else if (attributes & 0x10) {
@@ -151,8 +151,7 @@ void format_datetime(unsigned short date, unsigned short time, char* datetime_st
 }
 
 
-void print_directory(FILE *in, PartitionTable *pt, Fat16BootSector *bs,
-  int dir_offset, int data_region_offset, int level, int is_root) {
+void print_directory(FILE *in, PartitionTable *pt, Fat16BootSector *bs, int dir_offset, int data_region_offset, int level, int is_root) {
 Fat16Entry entries[512]; // max entries we expect (adjust if needed)
 int entry_count = 0;
 
@@ -166,7 +165,7 @@ int max_entries = is_root
 
 // === First pass: load entries into memory
 for (int i = 0; i < max_entries; i++) {
-Fat16Entry entry;
+
 if (fread(&entry, sizeof(Fat16Entry), 1, in) != 1) break;
 if (entry.filename[0] == 0x00) break;
 if (entry.filename[0] == 0xE5) continue;
@@ -176,46 +175,38 @@ entries[entry_count++] = entry;
 
 // === Second pass: print entries
 for (int i = 0; i < entry_count; i++) {
-Fat16Entry entry = entries[i];
+  entry = entries[i];
 
-char name_buffer[13] = {0};
-for (int j = 0; j < 8 && entry.filename[j] != ' '; j++) {
-name_buffer[j] = entry.filename[j];
-}
-if (entry.ext[0] != ' ') {
-strcat(name_buffer, ".");
-strncat(name_buffer, entry.ext, 3);
-for (int j = strlen(name_buffer) - 1; j >= 0 && name_buffer[j] == ' '; j--) {
-name_buffer[j] = '\0';
-}
-}
+  char name_buffer[13] = {0};
+  for (int j = 0; j < 8 && entry.filename[j] != ' '; j++) {
+      name_buffer[j] = entry.filename[j];
+  }
+  if (entry.ext[0] != ' ') {
+      strcat(name_buffer, ".");
+      strncat(name_buffer, entry.ext, 3);
+      for (int j = strlen(name_buffer) - 1; j >= 0 && name_buffer[j] == ' '; j--) {
+          name_buffer[j] = '\0';
+      }
+  }
 
-char datetime_str[30];
-format_datetime(entry.modify_date, entry.modify_time, datetime_str);
+  char datetime_str[30];
+  format_datetime(entry.modify_date, entry.modify_time, datetime_str);
 
-printf("%s%s %s %8u bytes %s\n",
-indent, name_buffer, get_attributes(entry.attributes),
-entry.file_size, datetime_str);
-}
+  printf("%s%s %s %8u bytes %s\n",
+      indent, name_buffer, get_attributes(entry.attributes),
+      entry.file_size, datetime_str);
 
-// === Third pass: process subdirectories
-for (int i = 0; i < entry_count; i++) {
-Fat16Entry entry = entries[i];
+  if ((entry.attributes & 0x10) &&
+      !(entry.filename[0] == '.' && (entry.filename[1] == '\0' || entry.filename[1] == ' ')) &&
+      !(entry.filename[0] == '.' && entry.filename[1] == '.' && (entry.filename[2] == '\0' || entry.filename[2] == ' '))) {
 
-if ((entry.attributes & 0x10) &&
-!(entry.filename[0] == '.' && (entry.filename[1] == '\0' || entry.filename[1] == ' ')) &&
-!(entry.filename[0] == '.' && entry.filename[1] == '.' && (entry.filename[2] == '\0' || entry.filename[2] == ' '))) {
+      int bytes_per_cluster = bs->sectors_per_cluster * bs->sector_size;
+      int cluster_offset = data_region_offset + (entry.starting_cluster - 2) * bytes_per_cluster;
 
-int bytes_per_cluster = bs->sectors_per_cluster * bs->sector_size;
-int cluster_offset = data_region_offset + (entry.starting_cluster - 2) * bytes_per_cluster;
-
-print_directory(in, pt, bs, cluster_offset, data_region_offset, level + 1, 0);
+      print_directory(in, pt, bs, cluster_offset, data_region_offset, level + 1, 0);
+  }
 }
 }
-}
-
-
-
 
 
 void print_tree() {
@@ -225,11 +216,6 @@ void print_tree() {
     return;
   }
   
-  PartitionTable pt[4];
-  Fat16BootSector bs;
-  
-  fseek(in, 0x1BE, SEEK_SET);
-  fread(pt, sizeof(PartitionTable), 4, in);
   
   fseek(in, 512 * pt[0].start_sector, SEEK_SET);
   fread(&bs, sizeof(Fat16BootSector), 1, in);
@@ -246,15 +232,28 @@ void print_tree() {
 }
 
 
+void change_directory(char *path) {
+
+}
+void list_files() {
+  // This function is not implemented yet.
+  printf("List files is not implemented yet.\n");
+}
+void delete_file(char *filename) {
+  // This function is not implemented yet.
+  printf("Delete file %s is not implemented yet.\n", filename);
+}
+void write_file(char *filename) {
+  // This function is not implemented yet.
+  printf("Write file %s is not implemented yet.\n", filename);
+}
+
+
 
 
 int main()
 {
-  FILE* in = fopen("sd.img", "rb");
-  int i;
-  PartitionTable pt[4];
-  Fat16BootSector bs;
-  Fat16Entry entry;
+  in = fopen("sd.img", "rb");
 
   fseek(in, 0x1BE, SEEK_SET);                // go to partition table start, partitions start at offset 0x1BE, see http://www.cse.scu.edu/~tschwarz/coen252_07Fall/Lectures/HDPartitions.html
   fread(pt, sizeof(PartitionTable), 4, in);  // read all entries (4)
@@ -308,17 +307,18 @@ int main()
       } 
 
       else if (strcmp(command, "ls") == 0) {
-          printf("Command 'ls' is not implemented yet.\n");
+        list_files();
       }
-      else if (strcmp(command, "write") == 0) {
-          printf("Command 'write' is not implemented yet.\n");
+      else if (strncmp(command, "cd ", 3) == 0) {
+          char *path = command + 3;
+          change_directory(path);
       }
       else if (strcmp(command, "printTree") == 0)
       {
         print_tree();
       }
       else if (strcmp(command, "delete") == 0) {
-          printf("Command 'delete' is not implemented yet.\n");
+          delete_file(command + 7);
       }
 
       else if (strcmp(command, "help") == 0) {
@@ -327,13 +327,13 @@ int main()
         printf("  exit           - Exit the program\n");
         printf("  help           - Show this help message\n");
         printf("  ls             - List files in the current directory (not implemented)\n");
-        printf("  write <filename> - Write a file to the FAT16 filesystem (not implemented)\n");
-        printf("  printTree      - Print the directory tree (not implemented)\n");
+        printf("  printTree      - Print the directory tree\n");
         printf("  delete <filename> - Delete a file from the FAT16 filesystem (not implemented)\n");
+        printf("  cd <path>      - Change directory (not implemented)\n");
     }
 
       else {
-          printf("Unknown command. Try: read <filename> or exit\n");
+          printf("Unknown command. Try: using help command\n");
       }
   }
   return 0;
