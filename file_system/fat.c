@@ -12,7 +12,9 @@ Fat16BootSector bs;
 Fat16Entry entry;
 
 
-
+char current_directory[1024] = "/root";
+int current_directory_offset = 0;
+int root_directory_offset = 0;
 
 void read(char *filename) {
   if (filename == NULL) {
@@ -151,7 +153,7 @@ void format_datetime(unsigned short date, unsigned short time, char* datetime_st
 }
 
 
-void print_directory(FILE *in, PartitionTable *pt, Fat16BootSector *bs, int dir_offset, int data_region_offset, int level, int is_root) {
+void print_directory(int dir_offset, int data_region_offset, int level, int is_root) {
 Fat16Entry entries[512]; // max entries we expect (adjust if needed)
 int entry_count = 0;
 
@@ -160,8 +162,8 @@ for (int i = 0; i < level; i++) strcat(indent, "  ");
 
 fseek(in, dir_offset, SEEK_SET);
 int max_entries = is_root
-? bs->root_dir_entries
-: (bs->sectors_per_cluster * bs->sector_size) / sizeof(Fat16Entry);
+? bs.root_dir_entries
+: (bs.sectors_per_cluster * bs.sector_size) / sizeof(Fat16Entry);
 
 // === First pass: load entries into memory
 for (int i = 0; i < max_entries; i++) {
@@ -200,10 +202,10 @@ for (int i = 0; i < entry_count; i++) {
       !(entry.filename[0] == '.' && (entry.filename[1] == '\0' || entry.filename[1] == ' ')) &&
       !(entry.filename[0] == '.' && entry.filename[1] == '.' && (entry.filename[2] == '\0' || entry.filename[2] == ' '))) {
 
-      int bytes_per_cluster = bs->sectors_per_cluster * bs->sector_size;
+      int bytes_per_cluster = bs.sectors_per_cluster * bs.sector_size;
       int cluster_offset = data_region_offset + (entry.starting_cluster - 2) * bytes_per_cluster;
 
-      print_directory(in, pt, bs, cluster_offset, data_region_offset, level + 1, 0);
+      print_directory(cluster_offset, data_region_offset, level + 1, 0);
   }
 }
 }
@@ -226,19 +228,46 @@ void print_tree() {
   
   printf("Directory Tree:\n");
 
-  print_directory(in, pt, &bs, root_dir_offset, data_region_offset, 0, 1);
+  print_directory(root_dir_offset, data_region_offset, 0, 1);
   printf("\n");
   fclose(in);
 }
 
-
-void change_directory(char *path) {
-
-}
 void list_files() {
   // This function is not implemented yet.
   printf("List files is not implemented yet.\n");
 }
+
+
+/*
+implement the function change_directory based on context from this whole file.
+use these globaly declared variables:
+char current_directory[1024] = "/root";
+int current_directory_offset = 0;
+int root_directory_offset = 0;
+
+
+*/
+
+
+void change_directory(char *path) {
+  // You can use the global variables current_directory and current_directory_offset to manage the current directory.
+  // You can also use the root_directory_offset variable to manage the root directory.
+  // Implement the logic to change the current directory based on the provided path.
+
+  // For example, if the path is "..", you can go up one level in the directory tree.
+  // If the path is ".", you can stay in the current directory.
+  // If the path is a valid directory name, you can change the current directory to that directory.
+  // You can also implement logic to handle the case when the directory does not exist.
+
+  
+
+
+}
+
+
+
+
 void delete_file(char *filename) {
   // This function is not implemented yet.
   printf("Delete file %s is not implemented yet.\n", filename);
