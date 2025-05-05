@@ -259,7 +259,11 @@ void change_directory(char *path) {
   // If the path is ".", you can stay in the current directory.
   // If the path is a valid directory name, you can change the current directory to that directory.
   // You can also implement logic to handle the case when the directory does not exist.
-
+  // Do not forget to update the current_directory variable accordingly.
+  // Do not forget to update the current_directory_offset variable accordingly.
+  // Do not forget to update the root_directory_offset variable accordingly.
+  // Do not implement absolute paths, only relative paths.
+  // implement so it will work like "cd DIR1" or "cd .."
   
 
 
