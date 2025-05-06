@@ -623,7 +623,7 @@ bool gt_schedule(void)
         if (!found)
         {
             gt_print_stats();
-            return false; 
+            return false;
         }
     }
 
@@ -709,9 +709,18 @@ bool round_robin_select(struct gt **selected)
 {
     struct gt *p = gt_current;
 
-    do {
+    do
+    {
         if (++p == &gt_table[MaxGThreads])
+        {
             p = &gt_table[0];
+        }
+
+        if (p == gt_current)
+        {
+            *selected = gt_current;
+            return true;
+        }
 
         if (p->state == Ready)
         {
@@ -722,7 +731,6 @@ bool round_robin_select(struct gt **selected)
 
     return false; // No ready threads
 }
-
 
 // Priority-based scheduling algorithm implementation
 /*
@@ -766,7 +774,6 @@ bool priority_based_select(struct gt **selected)
     return found;
 }*/
 
-
 /*for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
 {
     if (Blocked == p->state)
@@ -794,13 +801,6 @@ bool priority_based_select(struct gt **selected)
     }
 }*/
 
-
-
-
-
-
-
-
 bool priority_based_select(struct gt **selected)
 {
     struct gt *p = gt_current;
@@ -809,10 +809,17 @@ bool priority_based_select(struct gt **selected)
 
     do
     {
-        //printf("BASE PRIORITY: %d\n",p->base_priority);
+        // printf("Base Priority: %d", p->base_priority);
         if (++p == &gt_table[MaxGThreads])
         {
             p = &gt_table[0];
+        }
+
+        if (p == gt_current)
+        {
+            *selected = gt_current;
+            found = true;
+            break;
         }
 
         if (Blocked == p->state)
@@ -843,25 +850,6 @@ bool priority_based_select(struct gt **selected)
     return found;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Lottery scheduling algorithm implementation
 bool lottery_scheduling_select(struct gt **selected)
 {
@@ -871,22 +859,22 @@ bool lottery_scheduling_select(struct gt **selected)
     }
 
     int winning_ticket = select_winning_ticket();
-    printf("Winning ticket: %d\n", winning_ticket);
+    // printf("Winning ticket: %d\n", winning_ticket);
     struct gt *p;
 
     for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
     {
-        printf("Thread %d: Ticket Range: %d-%d\n", p - gt_table, p->ticket_start, p->ticket_end);
+        // printf("Thread %d: Ticket Range: %d-%d\n", p - gt_table, p->ticket_start, p->ticket_end);
         if ((p->state == Ready || p->state == Running) && winning_ticket >= p->ticket_start && winning_ticket <= p->ticket_end)
         {
-            printf(" *selected = p\n");
+            //printf(" *selected = p\n");
             *selected = p;
             return true;
         }
         if (Blocked == p->state && winning_ticket >= p->ticket_start &&
             winning_ticket <= p->ticket_end)
         {
-            printf("thread not found switching to round robin\n");
+            //printf("thread not found switching to round robin\n");
             bool found = round_robin_select(selected);
             return found;
         }
