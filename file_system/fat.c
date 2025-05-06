@@ -18,7 +18,6 @@ int root_directory_offset = 0;
 
 int dir_depth = 0;
 
-
 int read_fat_entry(int cluster)
 {
   int fat_offset = (pt[0].start_sector + bs.reserved_sectors) * bs.sector_size;
@@ -30,7 +29,12 @@ int read_fat_entry(int cluster)
 
 int get_data_region_offset()
 {
-  return (pt[0].start_sector + bs.reserved_sectors + bs.number_of_fats * bs.fat_size_sectors) * bs.sector_size;
+  return (pt[0].start_sector + bs.reserved_sectors + (bs.number_of_fats * bs.fat_size_sectors) + ((bs.root_dir_entries * 32) / bs.sector_size)) * bs.sector_size;
+}
+
+int get_root_directory_offset()
+{
+  return (pt[0].start_sector + bs.reserved_sectors + (bs.number_of_fats * bs.fat_size_sectors)) * bs.sector_size;
 }
 
 void read(char *filename)
@@ -78,9 +82,9 @@ void read(char *filename)
   }
 
   // calculate locations
-  int root_dir_offset = (pt[0].start_sector + bs.reserved_sectors + bs.number_of_fats * bs.fat_size_sectors) * bs.sector_size;
-  int data_region_offset = root_dir_offset + bs.root_dir_entries * sizeof(Fat16Entry);
-
+  int root_dir_offset = get_root_directory_offset();
+  int data_region_offset = get_data_region_offset();
+  // int data_region_offset = root_dir_offset + bs.root_dir_entries * sizeof(Fat16Entry);
   fseek(in, root_dir_offset, SEEK_SET);
 
   int found = 0;
@@ -286,7 +290,6 @@ void print_tree()
   fclose(in);
 }
 
-
 void list_current_directory(int current_directory_offset, int data_region_offset)
 {
   char name_buffer[13] = {0};
@@ -299,14 +302,35 @@ void list_current_directory(int current_directory_offset, int data_region_offset
   {
     perror("Error seeking to current directory");
     return;
-  }  
+  }
+
+  printf("Entry details:\n");
+  printf("Filename: %.8s\n", entry.filename);
+  printf("Extension: %.3s\n", entry.ext);
+  printf("Attributes: %02X\n", entry.attributes);
+  printf("File size: %u\n", entry.file_size);
+  printf("Starting cluster: %u\n", entry.starting_cluster);
+  printf("Modify date: %04X\n", entry.modify_date);
+  printf("Modify time: %04X\n", entry.modify_time);
+  printf("Current directory offset: %d\n", current_directory_offset);
+  printf("Data region offset: %d\n", data_region_offset);
+  printf("Cluster size: %d\n", cluster_size);
+  printf("Current directory: %s\n", current_directory);
+  printf("Root directory offset: %d\n", root_directory_offset);
 
   // TU ASI N2JAKY WHILE
-  for(int i = 0; i < cluster_size / sizeof(Fat16Entry); i++)
+
+  for (int i = 0; i < cluster_size / sizeof(Fat16Entry); i++)
   {
-    fread(&entry, sizeof(entry), 1, in);
-    if (entry.filename[0] == 0x00)
+    int readed = fread(&entry, sizeof(entry), 1, in);
+    if (readed != 1)
+    {
+      printf("Error reading entry");
       break;
+    }
+    printf("Entry %d: %.8s\n", i, entry.filename);
+    if (entry.filename[0] == 0x00)
+      continue;
     if (entry.filename[0] == 0xE5)
       continue;
     if ((entry.attributes & 0x0F) == 0x0F)
@@ -336,11 +360,11 @@ void list_current_directory(int current_directory_offset, int data_region_offset
 
 void list_files()
 {
-  
-  if(current_directory_offset == root_directory_offset)
+
+  if (current_directory_offset == root_directory_offset)
   {
     printf("Listing files in root directory:\n");
-    print_directory(root_directory_offset, get_data_region_offset(), 0, 1);
+    print_directory(root_directory_offset, get_root_directory_offset(), 0, 1);
   }
   else
   {
@@ -363,14 +387,14 @@ void fill_name(const char *input, char output[8])
     output[i] = ' ';
   }
 
- // output[8] = '\0'; // Null-terminate the output string
+  // output[8] = '\0'; // Null-terminate the output string
 }
 
 void print_name(const char *input)
 {
   for (int i = 0; i < 8; i++)
   {
-    printf("%s: %c\n", input,input[i]);
+    printf("%s: %c\n", input, input[i]);
   }
 }
 
@@ -389,10 +413,10 @@ int change_directory(char *name)
       {
         printf("Entry: %.8s | EXT: %.3s | size: %.10u bytes | attributes: %s\n", entry.filename, entry.ext, entry.file_size, get_attributes(entry.attributes));
 
-        //printf("comparing: %s with %s\n", name, entry.filename);
+        // printf("comparing: %s with %s\n", name, entry.filename);
 
         char name_filled[8] = {0};
-        fill_name(name,name_filled);
+        fill_name(name, name_filled);
         if (strncmp(name_filled, entry.filename, 8) == 0)
         {
           printf("IF: Found directory: %s\n", entry.filename);
@@ -424,11 +448,8 @@ int change_directory(char *name)
     fread(&cluster, 2, 1, in);
   }
 
-  
+
   */
-
-
-
 }
 // You can use the global variables current_directory and current_directory_offset to manage the current directory.
 // You can also use the root_directory_offset variable to manage the root directory.
@@ -500,7 +521,7 @@ int main()
   char command[256];
   while (1)
   {
-    printf("\n%s> ",current_directory);
+    printf("\n%s> ", current_directory);
     if (!fgets(command, sizeof(command), stdin))
     {
       break;
