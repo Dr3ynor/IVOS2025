@@ -96,7 +96,7 @@ int main(void)
 
 	gt_init(); // initialize threads, see gthr.c
 
-	gt_sem_init(&sem, 0); // initialize semaphore
+	gt_sem_init(&sem, 1); // initialize semaphore
 
 	/*
 	gt_create(f, 1);		   // set f() as first thread
@@ -105,10 +105,10 @@ int main(void)
 	gt_create(g, 10);		   // set g() as fourth thread
 	*/
 	
-	gt_create(f_sem, 1);		   // set f() as first thread
-	gt_create(f_sem, 2); // set f() as second thread
-	gt_create(f_sem, 3);		   // set g() as third thread
-	gt_create(f_sem, 4);		   // set g() as fourth thread
+	gt_create(f_sem, 18);		   // set f() as first thread
+	gt_create(f_sem, 12); // set f() as second thread
+	gt_create(f_sem, 6);		   // set g() as third thread
+	gt_create(f_sem, 2);		   // set g() as fourth thread
 	
 	// TODO: ROUNDROBIN S SEMAFOREM NEFUNGUJE
 
