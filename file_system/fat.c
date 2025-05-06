@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
 
 #define MAX_DEPTH 16
 
@@ -11,12 +12,62 @@ int i;
 PartitionTable pt[4];
 Fat16BootSector bs;
 Fat16Entry entry;
+Fat16Entry current_entry;
 
 char current_directory[1024] = "/root";
 int current_directory_offset = 0;
 int root_directory_offset = 0;
 
 int dir_depth = 0;
+
+char *get_attributes(unsigned char attributes)
+{
+  if (attributes & 0x01)
+  {
+    return "<RDO>";
+  }
+  else if (attributes & 0x02)
+  {
+    return "<HID>";
+  }
+  else if (attributes & 0x04)
+  {
+    return "<SYS>";
+  }
+  else if (attributes & 0x08)
+  {
+    return "<VOL>";
+  }
+  else if (attributes & 0x10)
+  {
+    return "<DIR>";
+  }
+  else if (attributes & 0x20)
+  {
+    return "<FIL>";
+  }
+  else
+  {
+    return "<UNK>";
+  }
+}
+
+void format_datetime(unsigned short date, unsigned short time, char *datetime_str)
+{
+  int year = ((date >> 9) & 0x7F) + 1980;
+  int month = (date >> 5) & 0x0F;
+  int day = date & 0x1F;
+
+  int hour = (time >> 11) & 0x1F;
+  int minute = (time >> 5) & 0x3F;
+
+  static const char *month_names[] = {
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+  sprintf(datetime_str, "%02d-%s-%04d %02d:%02d",
+          day, month_names[month - 1], year, hour, minute);
+}
 
 int read_fat_entry(int cluster)
 {
@@ -81,120 +132,145 @@ void read(char *filename)
     return;
   }
 
-  // calculate locations
-  int root_dir_offset = get_root_directory_offset();
-  int data_region_offset = get_data_region_offset();
-  // int data_region_offset = root_dir_offset + bs.root_dir_entries * sizeof(Fat16Entry);
-  fseek(in, root_dir_offset, SEEK_SET);
-
-  int found = 0;
-  for (int i = 0; i < bs.root_dir_entries; i++)
+  if (current_directory_offset == root_directory_offset)
   {
-    fread(&entry, sizeof(Fat16Entry), 1, in);
+    // calculate locations
+    int data_region_offset = get_data_region_offset();
+    fseek(in, root_directory_offset, SEEK_SET);
 
-    if (entry.filename[0] == 0x00)
-      break; // No more entries
-    if ((entry.attributes & 0x0F) == 0x0F)
-      continue; // Skip long file names
-
-    if (memcmp(entry.filename, fat_name, 8) == 0 &&
-        memcmp(entry.ext, fat_ext, 3) == 0)
+    int found = 0;
+    for (int i = 0; i < bs.root_dir_entries; i++)
     {
-      found = 1;
-      printf("Found file: %.8s.%.3s, size: %u bytes\n", entry.filename, entry.ext, entry.file_size);
-      break;
+      fread(&entry, sizeof(Fat16Entry), 1, in);
+
+      if (entry.filename[0] == 0x00)
+        break; // No more entries
+      if ((entry.attributes & 0x0F) == 0x0F)
+        continue; // Skip long file names
+
+      if (memcmp(entry.filename, fat_name, 8) == 0 &&
+          memcmp(entry.ext, fat_ext, 3) == 0)
+      {
+        found = 1;
+        printf("Found file: %.8s.%.3s, size: %u bytes\n", entry.filename, entry.ext, entry.file_size);
+        break;
+      }
     }
-  }
 
-  if (!found)
-  {
-    printf("File not found: %s\n", filename);
+    if (!found)
+    {
+      printf("File not found: %s\n", filename);
+      fclose(in);
+      return;
+    }
+
+    // read file with multiple clusters
+    unsigned short cluster = entry.starting_cluster;
+    unsigned int file_size = entry.file_size;
+    unsigned char *buffer = malloc(file_size);
+    if (!buffer)
+    {
+      fprintf(stderr, "Memory allocation failed\n");
+      fclose(in);
+      return;
+    }
+
+    int bytes_per_cluster = bs.sectors_per_cluster * bs.sector_size;
+    int fat_offset = (pt[0].start_sector + bs.reserved_sectors) * bs.sector_size;
+
+    int bytes_read = 0;
+    while (cluster >= 0x0002 && cluster < 0xFFF8 && bytes_read < file_size)
+    {
+      int cluster_offset = data_region_offset + (cluster - 2) * bytes_per_cluster;
+      fseek(in, cluster_offset, SEEK_SET);
+
+      int to_read = (file_size - bytes_read > bytes_per_cluster) ? bytes_per_cluster : (file_size - bytes_read);
+      fread(buffer + bytes_read, 1, to_read, in);
+      bytes_read += to_read;
+
+      // read next cluster from FAT
+      fseek(in, fat_offset + cluster * 2, SEEK_SET);
+      fread(&cluster, 2, 1, in);
+    }
+
+    fwrite(buffer, 1, file_size, stderr);
+    printf("\n\nRead complete (%u bytes)\n", file_size);
+
+    free(buffer);
     fclose(in);
-    return;
-  }
-
-  unsigned short cluster = entry.starting_cluster;
-  unsigned int file_size = entry.file_size;
-  unsigned char *buffer = malloc(file_size);
-  if (!buffer)
-  {
-    fprintf(stderr, "Memory allocation failed\n");
-    fclose(in);
-    return;
-  }
-
-  int bytes_per_cluster = bs.sectors_per_cluster * bs.sector_size;
-  int fat_offset = (pt[0].start_sector + bs.reserved_sectors) * bs.sector_size;
-
-  int bytes_read = 0;
-  while (cluster >= 0x0002 && cluster < 0xFFF8 && bytes_read < file_size)
-  {
-    int cluster_offset = data_region_offset + (cluster - 2) * bytes_per_cluster;
-    fseek(in, cluster_offset, SEEK_SET);
-
-    int to_read = (file_size - bytes_read > bytes_per_cluster) ? bytes_per_cluster : (file_size - bytes_read);
-    fread(buffer + bytes_read, 1, to_read, in);
-    bytes_read += to_read;
-
-    // read next cluster from FAT
-    fseek(in, fat_offset + cluster * 2, SEEK_SET);
-    fread(&cluster, 2, 1, in);
-  }
-
-  fwrite(buffer, 1, file_size, stderr);
-  printf("\n\nRead complete (%u bytes)\n", file_size);
-
-  free(buffer);
-  fclose(in);
-}
-
-char *get_attributes(unsigned char attributes)
-{
-  if (attributes & 0x01)
-  {
-    return "<RDO>";
-  }
-  else if (attributes & 0x02)
-  {
-    return "<HID>";
-  }
-  else if (attributes & 0x04)
-  {
-    return "<SYS>";
-  }
-  else if (attributes & 0x08)
-  {
-    return "<VOL>";
-  }
-  else if (attributes & 0x10)
-  {
-    return "<DIR>";
-  }
-  else if (attributes & 0x20)
-  {
-    return "<FIL>";
   }
   else
   {
-    return "<UNK>";
+
+    // TODO: ŠPATNĚ NAČÍTÁ ENTRY
+    printf("ELSE\n");
+    printf("current_directory_offset: %d\n", current_directory_offset);
+    int data_region_offset = get_data_region_offset();
+    int cluster_size = bs.sectors_per_cluster * bs.sector_size;
+
+    printf("current_entry.filename: %.8s\n", current_entry.filename);
+    int current_cluster = current_entry.starting_cluster;
+    printf("current_cluster: %d\n", current_cluster);
+    int bytes_read = 0;
+    int bytes_per_cluster = bs.sectors_per_cluster * bs.sector_size;
+    int fat_offset = (pt[0].start_sector + bs.reserved_sectors) * bs.sector_size;
+
+    unsigned int file_size = entry.file_size;
+    unsigned char *buffer = malloc(file_size);
+    if (!buffer)
+    {
+      fprintf(stderr, "Memory allocation failed\n");
+      fclose(in);
+      return;
+    }
+
+    while (current_cluster < 0xFFFF) //&& bytes_read < file_size)
+    {
+      int cluster_offset = data_region_offset + ((current_cluster - 2) * bs.sectors_per_cluster) * bs.sector_size;
+      // int cluster_offset = data_region_offset + (current_cluster - 2) * bytes_per_cluster;
+      fseek(in, cluster_offset, SEEK_SET);
+
+      for (int i = 0; i < cluster_size / sizeof(Fat16Entry); i++)
+      {
+        fread(&entry, sizeof(entry), 1, in);
+        if (entry.filename[0] == 0x00)
+          break;
+        if (entry.filename[0] == 0xE5)
+          continue;
+        if ((entry.attributes & 0x0F) == 0x0F)
+          continue;
+
+        char name_buffer[13] = {0};
+        for (int j = 0; j < 8 && entry.filename[j] != ' '; j++)
+        {
+          name_buffer[j] = entry.filename[j];
+        }
+        if (entry.ext[0] != ' ')
+        {
+          strcat(name_buffer, ".");
+          strncat(name_buffer, entry.ext, 3);
+          for (int j = strlen(name_buffer) - 1; j >= 0 && name_buffer[j] == ' '; j--)
+          {
+            name_buffer[j] = '\0';
+          }
+        }
+
+        char datetime_str[30];
+        format_datetime(entry.modify_date, entry.modify_time, datetime_str);
+
+        printf("%s %s %8u bytes %s\n",
+               name_buffer, get_attributes(entry.attributes),
+               entry.file_size, datetime_str);
+      }
+    }
+
+    fwrite(buffer, 1, file_size, stderr);
+    printf("\n\nRead complete (%u bytes)\n", file_size);
+
+    free(buffer);
+    fclose(in);
+    return;
   }
-}
-
-void format_datetime(unsigned short date, unsigned short time, char *datetime_str)
-{
-  int year = ((date >> 9) & 0x7F) + 1980;
-  int month = (date >> 5) & 0x0F;
-  int day = date & 0x1F;
-
-  int hour = (time >> 11) & 0x1F;
-  int minute = (time >> 5) & 0x3F;
-
-  static const char *month_names[] = {
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-  sprintf(datetime_str, "%02d-%s-%04d %02d:%02d",
-          day, month_names[month - 1], year, hour, minute);
 }
 
 void print_directory(int dir_offset, int data_region_offset, int level, int is_root)
@@ -304,58 +380,58 @@ void list_current_directory(int current_directory_offset, int data_region_offset
     return;
   }
 
-  printf("Entry details:\n");
-  printf("Filename: %.8s\n", entry.filename);
-  printf("Extension: %.3s\n", entry.ext);
-  printf("Attributes: %02X\n", entry.attributes);
-  printf("File size: %u\n", entry.file_size);
-  printf("Starting cluster: %u\n", entry.starting_cluster);
-  printf("Modify date: %04X\n", entry.modify_date);
-  printf("Modify time: %04X\n", entry.modify_time);
-  printf("Current directory offset: %d\n", current_directory_offset);
-  printf("Data region offset: %d\n", data_region_offset);
-  printf("Cluster size: %d\n", cluster_size);
-  printf("Current directory: %s\n", current_directory);
-  printf("Root directory offset: %d\n", root_directory_offset);
 
-  // TU ASI N2JAKY WHILE
+  int current_cluster = current_entry.starting_cluster;
+  int bytes_read = 0;
+  int bytes_per_cluster = bs.sectors_per_cluster * bs.sector_size;
+  int fat_offset = (pt[0].start_sector + bs.reserved_sectors) * bs.sector_size;
 
-  for (int i = 0; i < cluster_size / sizeof(Fat16Entry); i++)
+  unsigned int file_size = entry.file_size;
+  unsigned char *buffer = malloc(file_size);
+  if (!buffer)
   {
-    int readed = fread(&entry, sizeof(entry), 1, in);
-    if (readed != 1)
-    {
-      printf("Error reading entry");
-      break;
-    }
-    printf("Entry %d: %.8s\n", i, entry.filename);
-    if (entry.filename[0] == 0x00)
-      continue;
-    if (entry.filename[0] == 0xE5)
-      continue;
-    if ((entry.attributes & 0x0F) == 0x0F)
-      continue;
-
-    for (int j = 0; j < 8 && entry.filename[j] != ' '; j++)
-    {
-      name_buffer[j] = entry.filename[j];
-    }
-    if (entry.ext[0] != ' ')
-    {
-      strcat(name_buffer, ".");
-      strncat(name_buffer, entry.ext, 3);
-      for (int j = strlen(name_buffer) - 1; j >= 0 && name_buffer[j] == ' '; j--)
-      {
-        name_buffer[j] = '\0';
-      }
-    }
-
-    format_datetime(entry.modify_date, entry.modify_time, datetime_str);
-
-    printf("%s %s %8u bytes %s\n",
-           name_buffer, get_attributes(entry.attributes),
-           entry.file_size, datetime_str);
+    fprintf(stderr, "Memory allocation failed\n");
+    fclose(in);
+    return;
   }
+
+    int cluster_offset = data_region_offset + ((current_cluster - 2) * bs.sectors_per_cluster) * bs.sector_size;
+    // int cluster_offset = data_region_offset + (current_cluster - 2) * bytes_per_cluster;
+    fseek(in, cluster_offset, SEEK_SET);
+
+    for (int i = 0; i < cluster_size / sizeof(Fat16Entry); i++)
+    {
+      fread(&entry, sizeof(entry), 1, in);
+      if (entry.filename[0] == 0x00)
+        break;
+      if (entry.filename[0] == 0xE5)
+        continue;
+      if ((entry.attributes & 0x0F) == 0x0F)
+        continue;
+
+      char name_buffer[13] = {0};
+      for (int j = 0; j < 8 && entry.filename[j] != ' '; j++)
+      {
+        name_buffer[j] = entry.filename[j];
+      }
+      if (entry.ext[0] != ' ')
+      {
+        strcat(name_buffer, ".");
+        strncat(name_buffer, entry.ext, 3);
+        for (int j = strlen(name_buffer) - 1; j >= 0 && name_buffer[j] == ' '; j--)
+        {
+          name_buffer[j] = '\0';
+        }
+      }
+
+      char datetime_str[30];
+      format_datetime(entry.modify_date, entry.modify_time, datetime_str);
+
+      printf("%s %s %8u bytes %s\n",
+             name_buffer, get_attributes(entry.attributes),
+             entry.file_size, datetime_str);
+    }
+  
 }
 
 void list_files()
@@ -401,7 +477,23 @@ void print_name(const char *input)
 int change_directory(char *name)
 {
   int seeked = fseek(in, current_directory_offset, SEEK_SET);
-  printf("Seeked: %d\n", seeked);
+
+  if (strncmp(name, "..", 2) == 0)
+  {
+    // Go up one directory
+    if (dir_depth > 0)
+    {
+      dir_depth--;
+      char *last_slash = strrchr(current_directory, '/');
+      if (last_slash)
+      {
+        *last_slash = '\0';
+      }
+      current_directory_offset = root_directory_offset;
+      return 0;
+    }
+  }
+
 
   if (current_directory_offset == root_directory_offset)
   {
@@ -411,7 +503,7 @@ int change_directory(char *name)
       // Skip if filename was never used, see http://www.tavi.co.uk/phobos/fat.html#file_attributes
       if (entry.filename[0] != 0x00 && entry.attributes == 0x10)
       {
-        printf("Entry: %.8s | EXT: %.3s | size: %.10u bytes | attributes: %s\n", entry.filename, entry.ext, entry.file_size, get_attributes(entry.attributes));
+        //printf("Entry: %.8s | EXT: %.3s | size: %.10u bytes | attributes: %s\n", entry.filename, entry.ext, entry.file_size, get_attributes(entry.attributes));
 
         // printf("comparing: %s with %s\n", name, entry.filename);
 
@@ -419,13 +511,14 @@ int change_directory(char *name)
         fill_name(name, name_filled);
         if (strncmp(name_filled, entry.filename, 8) == 0)
         {
-          printf("IF: Found directory: %s\n", entry.filename);
+          //printf("IF: Found directory: %s\n", entry.filename);
           // Found the directory
           dir_depth++;
           current_directory_offset = entry.starting_cluster * bs.sector_size;
-          printf("Changed directory to: %s\n", entry.filename);
+          // printf("Changed directory to: %s\n", entry.filename);
           strcat(current_directory, "/");
           strcat(current_directory, name);
+          current_entry = entry;
           return 0;
         }
       }
@@ -451,19 +544,6 @@ int change_directory(char *name)
 
   */
 }
-// You can use the global variables current_directory and current_directory_offset to manage the current directory.
-// You can also use the root_directory_offset variable to manage the root directory.
-// Implement the logic to change the current directory based on the provided path.
-
-// For example, if the path is "..", you can go up one level in the directory tree.
-// If the path is ".", you can stay in the current directory.
-// If the path is a valid directory name, you can change the current directory to that directory.
-// You can also implement logic to handle the case when the directory does not exist.
-// Do not forget to update the current_directory variable accordingly.
-// Do not forget to update the current_directory_offset variable accordingly.
-// Do not forget to update the root_directory_offset variable accordingly.
-// Do not implement absolute paths, only relative paths.
-// implement so it will work like "cd DIR1" or "cd .."
 
 void delete_file(char *filename)
 {
@@ -549,7 +629,7 @@ int main()
       char *path = command + 3;
       change_directory(path);
     }
-    else if (strcmp(command, "printTree") == 0)
+    else if (strcmp(command, "tree") == 0)
     {
       print_tree();
     }
@@ -565,7 +645,7 @@ int main()
       printf("  exit           - Exit the program\n");
       printf("  help           - Show this help message\n");
       printf("  ls             - List files in the current directory (not implemented)\n");
-      printf("  printTree      - Print the directory tree\n");
+      printf("  tree           - Print the directory tree\n");
       printf("  delete <filename> - Delete a file from the FAT16 filesystem (not implemented)\n");
       printf("  cd <path>      - Change directory (not implemented)\n");
     }
