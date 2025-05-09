@@ -14,10 +14,11 @@
 
 struct semaphore_t sem;
 
+static int x;
+
 // Dummy function to simulate some thread work
 void f(void)
 {
-	static int x;
 	int i = 0, id;
 
 	id = ++x;
@@ -34,7 +35,6 @@ void f(void)
 // Dummy function to simulate some thread work
 void g(void)
 {
-	static int x;
 	int i = 0, id;
 
 	id = ++x;
@@ -49,7 +49,6 @@ void g(void)
 
 void f_sem(void)
 {
-	static int x;
 	int i = 0, id;
 	id = ++x;
 	while (true)
@@ -57,34 +56,41 @@ void f_sem(void)
 
 		// printf("Semaphore value before WAIT: %d\n", sem.value);
 		gt_sem_wait(&sem);
-		printf("SEMAPHORE IN CRITICAL SECTION WITH ID %d\n",id);
+		printf("F entering critical section with id %d\n", id);
+		//printf("SEMAPHORE IN CRITICAL SECTION WITH ID %d\n",id);
 
 
 		// printf("Semaphore value: %d\n", sem.value);
-		// printf("F Thread id = %d, val = %d BEGINNING\n", id, ++i);
+		printf("F Thread id = %d, val = %d BEGINNING\n", id, ++i);
 		gt_uninterruptible_nanosleep(0, 50000000);
-		// printf("F Thread id = %d, val = %d END\n", id, ++i);
+		printf("F Thread id = %d, val = %d END\n", id, ++i);
 		gt_uninterruptible_nanosleep(0, 50000000);
 
+		printf("F leaving critical section with id %d\n", id);
 		gt_sem_post(&sem); // Signal semaphore
 	}
 }
 
 void g_sem(void)
 {
-	static int x;
 	int i = 0, id;
 	id = ++x;
-
 	while (true)
 	{
-		gt_sem_wait(&sem);
 
+		// printf("Semaphore value before WAIT: %d\n", sem.value);
+		gt_sem_wait(&sem);
+		printf("G entering critical section with id %d\n", id);
+		//printf("SEMAPHORE IN CRITICAL SECTION WITH ID %d\n",id);
+
+
+		// printf("Semaphore value: %d\n", sem.value);
 		printf("G Thread id = %d, val = %d BEGINNING\n", id, ++i);
 		gt_uninterruptible_nanosleep(0, 50000000);
 		printf("G Thread id = %d, val = %d END\n", id, ++i);
 		gt_uninterruptible_nanosleep(0, 50000000);
 
+		printf("G leaving critical section with id %d\n", id);
 		gt_sem_post(&sem); // Signal semaphore
 	}
 }
@@ -106,9 +112,9 @@ int main(void)
 	*/
 	
 	gt_create(f_sem, 18);		   // set f() as first thread
-	gt_create(f_sem, 12); // set f() as second thread
+	gt_create(g_sem, 12); // set f() as second thread
 	gt_create(f_sem, 6);		   // set g() as third thread
-	gt_create(f_sem, 2);		   // set g() as fourth thread
+	gt_create(g_sem, 2);		   // set g() as fourth thread
 	
 	// TODO: ROUNDROBIN S SEMAFOREM NEFUNGUJE
 

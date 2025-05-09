@@ -24,8 +24,6 @@
 #define ANSI_COLOR_CYAN "\x1b[36m"
 #define ANSI_COLOR_RESET "\x1b[0m"
 
-//! TODO předělat priority based na RR s prioritami + prevence vyhladovění
-
 int total_tickets = 0; // Total number of tickets for lottery scheduling
 
 // PriorityBased
@@ -175,6 +173,7 @@ void gt_sem_post(struct semaphore_t *sem)
 
     // Restore the original signal mask
     sigprocmask(SIG_SETMASK, &old_mask, NULL);
+    gt_schedule(); // Switch to another thread
 }
 
 void assign_tickets(struct gt *thread)
@@ -463,6 +462,7 @@ void gt_print_stats()
                priority_color, gt_table[i].current_priority, gt_table[i].base_priority, ANSI_COLOR_RESET);
     }
 
+
     printf("--- Additional Thread Info ---\n");
 
     for (int i = 0; i < MaxGThreads; i++)
@@ -536,7 +536,7 @@ void gt_print_stats()
     printf("-----------------------------\n");
     printf("Selected algoirthm: %s\n", current_algorithm);
     printf("Total Tickets: %d\n", total_tickets);
-    exit(0); // Exit after printing stats
+    //exit(0); // Exit after printing stats
 }
 
 // initialize first thread as current context
@@ -711,9 +711,15 @@ bool round_robin_select(struct gt **selected)
 
     do
     {
+
         if (++p == &gt_table[MaxGThreads])
         {
             p = &gt_table[0];
+        }
+
+        if(p->state == Blocked)
+        {
+            continue; // Skip blocked threads
         }
 
         if (p == gt_current)
@@ -732,74 +738,6 @@ bool round_robin_select(struct gt **selected)
     return false; // No ready threads
 }
 
-// Priority-based scheduling algorithm implementation
-/*
-bool priority_based_select(struct gt **selected)
-{
-    struct gt *p = gt_current;
-    int highest_priority = 0;
-    bool found = false;
-
-    for (int i = 0; i < MaxGThreads; i++)
-    {
-        if (++p == &gt_table[MaxGThreads])
-        {
-            p = &gt_table[0];
-        }
-
-        if (p->state == Blocked)
-        {
-            continue;
-        }
-
-        if (p->state == Ready)
-        {
-            // Apply starvation prevention
-            p->current_priority++;
-
-            if (p->current_priority > MaxPriority)
-            {
-                p->current_priority = MaxPriority;
-            }
-
-            if (p->current_priority >= highest_priority)
-            {
-                highest_priority = p->current_priority;
-                *selected = p;
-                found = true;
-            }
-        }
-    }
-
-    return found;
-}*/
-
-/*for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
-{
-    if (Blocked == p->state)
-    {
-        continue;
-    }
-    if (p->state == Ready)
-    {
-        // Apply starvation prevention: boost priority if skipped too many times
-        p->current_priority++;
-
-        // Cap the boosted priority
-        if (p->current_priority > MaxPriority)
-        {
-            p->current_priority = MaxPriority;
-        }
-
-        // Select thread based on priority
-        if (p->current_priority >= highest_priority)
-        {
-            highest_priority = p->current_priority;
-            *selected = p;
-            found = true;
-        }
-    }
-}*/
 
 bool priority_based_select(struct gt **selected)
 {
@@ -859,22 +797,18 @@ bool lottery_scheduling_select(struct gt **selected)
     }
 
     int winning_ticket = select_winning_ticket();
-    // printf("Winning ticket: %d\n", winning_ticket);
     struct gt *p;
 
     for (p = &gt_table[0]; p < &gt_table[MaxGThreads]; p++)
     {
-        // printf("Thread %d: Ticket Range: %d-%d\n", p - gt_table, p->ticket_start, p->ticket_end);
         if ((p->state == Ready || p->state == Running) && winning_ticket >= p->ticket_start && winning_ticket <= p->ticket_end)
         {
-            //printf(" *selected = p\n");
             *selected = p;
             return true;
         }
         if (Blocked == p->state && winning_ticket >= p->ticket_start &&
             winning_ticket <= p->ticket_end)
         {
-            //printf("thread not found switching to round robin\n");
             bool found = round_robin_select(selected);
             return found;
         }
